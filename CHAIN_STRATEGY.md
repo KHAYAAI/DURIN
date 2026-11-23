@@ -21,7 +21,14 @@ Native USDC and bridged USDC (e.g. "USDC.e") are different assets. DURIN must on
 5. Counsel has confirmed the asset is acceptable under SARB exchange-control and FSCA/FIC requirements.
 
 ## What the code does today
-Chain is a parameter on deposit addresses and withdrawals; the sandbox defaults to `ethereum-sepolia`. **No chain-specific logic exists**: there is no confirmation-depth policy, no allow-list of enabled chains, and no native-vs-bridged check. Those belong in the live Layer 1 adapter and in a configuration of enabled `(asset, chain)` pairs — see `PRODUCTION_READINESS.md`.
+Implemented in `api/src/chains/chain-policy.ts` (unit + integration tested):
+- **Enabled-chain allow-list** (`ENABLED_CHAINS`, default `USDC:ethereum,USDC:solana`). USDT is **off by default**; USDT-on-Tron needs an explicit entry after compliance sign-off. Test networks are only available in sandbox mode and are stripped in production even if listed.
+- **Native-only tokens:** a deposit is credited only if its token contract/mint equals the registry's native identifier; look-alike contracts and bridged symbols (`USDC.e`, wormhole, axelar…) are rejected, audited (`deposit.rejected`) and never credited.
+- **Confirmation depth** per chain (EVM 12, Tron 19, Solana finalized) — below it the deposit is `pending` and re-evaluated as confirmations grow; credits are idempotent per `(address, txHash)`.
+- **Address validation** per chain family on withdrawal destinations; chain is required in production (no silent default).
+- `WalletsService.recordDetectedDeposit` is the entry point a live custody adapter or its webhook handler calls. `GET /v1/chains` lists what is enabled.
+
+**Not verified:** the token identifiers in the registry are the issuers' published addresses as I know them; **verify each against [Circle](https://developers.circle.com/stablecoins/usdc-contract-addresses) / [Tether](https://tether.to/en/supported-protocols/) before enabling a mainnet chain**, and have the custodian confirm the confirmation depths it actually finalises at. Chain-event *detection* itself (watching the chain or the custodian's feed) is the live adapter's job and is not built.
 
 ## Evidence gathered (checked 2026-11-23)
 - **VALR (a likely SA liquidity venue):** its support page lists [USDC deposits/withdrawals on Arbitrum, Avalanche, Solana, Base and Ethereum](https://support.valr.com/hc/en-us/articles/10810569257628-USDC-Deposits-Withdrawals-on-Solana-Avalanche-and-Ethereum), and warns that sending on the wrong network loses funds permanently. VALR's [2024 review](https://accordion-blue-yrk3.squarespace.com/blog/2024-reflecting-on-a-transformative-year) says USDT on Tron and USDT/USDC on Solana were added. I found **no current source listing Tron for USDC**. The page date is unconfirmed — check the live deposit screen. This is why the table above leads with USDC on Ethereum/Solana and treats USDT-on-Tron as conditional.

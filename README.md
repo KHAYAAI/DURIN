@@ -85,9 +85,10 @@ trigger behaviour is tested exactly as deployed.
 | Ledger, idempotency, webhooks, reconciliation, conversion state machine | Built and tested (sandbox) |
 | Didit KYC/KYB, WorkOS SSO/MFA | Built and tested against fakes; **accounts not yet configured** |
 | Live custody / fiat / liquidity adapters | **Not built** (need agreements and credentials) |
-| Gate G1 — counsel sign-off on live conversion | **Closed** |
-| Chain policy (allow-list, confirmations, native-only) | **Not built**; see [CHAIN_STRATEGY.md](CHAIN_STRATEGY.md) |
-| Security review, DR drills, monitoring | **Not done** |
+| Gate G1 — sign-off recording mechanism | Built; **no sign-off recorded (closed)** |
+| Chain policy (allow-list, confirmations, native-only) | Built and tested; live detection needs the live adapter; see [CHAIN_STRATEGY.md](CHAIN_STRATEGY.md) |
+| Monitoring, alert rules, runbook, backup/restore drill | Built; drill passed on test data; not deployed |
+| Independent security review, production-size restore, on-call | **Not done** |
 
 ## Docs
 

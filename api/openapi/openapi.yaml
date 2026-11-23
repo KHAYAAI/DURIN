@@ -497,6 +497,37 @@ paths:
       summary: Link this organisation to its WorkOS organization (admin + MFA)
       responses:
         '200': { description: Linked }
+  /chains:
+    get:
+      tags: [Wallets]
+      summary: Chains enabled in this environment, with native token identifiers and confirmation depth
+      responses:
+        '200': { description: OK }
+  /compliance/gates/g1:
+    get:
+      tags: [Compliance]
+      summary: List Gate G1 (counsel sign-off) records
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Compliance]
+      summary: Record a Gate G1 sign-off (signed-in admin user with MFA only; never an API key)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [counselReference, documentSha256, assets, jurisdictions, validDays], properties: { counselReference: { type: string }, documentSha256: { type: string }, assets: { type: array, items: { type: string } }, jurisdictions: { type: array, items: { type: string } }, validDays: { type: integer, minimum: 1, maximum: 365 } } }
+      responses:
+        '201': { description: Recorded }
+        '403': { description: Not a signed-in user, or MFA not completed }
+  /compliance/gates/g1/{id}/revoke:
+    post:
+      tags: [Compliance]
+      summary: Revoke a Gate G1 sign-off (closes the gate immediately)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '201': { description: Revoked }
   /version:
     get:
       tags: [Meta]
