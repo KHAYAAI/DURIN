@@ -19,6 +19,11 @@
 | **Adapter contract suite** — idempotent withdrawals/orders, fresh custody snapshots, tenant scoping; runnable against any live adapter's vendor sandbox | Passes for sandbox adapters; it already caught a real gap (non-idempotent sandbox withdrawals) | `test/contract/` |
 | **Security hardening from my own review** — secrets excluded from the idempotency store, suspended organisations refused for API keys, operator-only WorkOS linking, cooling-off before "not executed" release, snapshot-staleness check | Implemented | `api.int.spec.ts`, `workos.int.spec.ts`, `conversion-recon.int.spec.ts` |
 
+## Liquidity strategy (decided 2026-11-23)
+1. Launch with an **external liquidity provider** (shortlist VALR / Yellow Card; not yet chosen or contracted).
+2. **Net opposing flows internally**, hedging only the residual — designed in `NETTING_DESIGN.md`; the calculator is built and tested, **not wired in**, and waits on counsel (it creates a transient principal position unless matching is atomic).
+3. **Small own inventory later**, after counsel, capital and risk limits. Not built.
+
 ## Account configuration performed (non-secret identifiers)
 - **Didit** (organisation A-CARD, **Sandbox** application only; live application untouched): workflows created and published — *DURIN Business KYB* `65a5d74a-6905-4590-971a-e9bd65641b4e` (registry + documents[LEGAL_PRESENCE required] + key people + AML) and *DURIN Account Holder KYC* `be3877e5-9b0d-4fa2-9d68-123c25160f2a` (OCR + passive liveness + face match + AML + IP analysis). **No webhook destination and no API key were created** (needs a public API URL; secrets must not pass through this session).
 - **WorkOS** (A-CARD's Project → **Staging**, client `client_01M079SBRGBJ82933Y70J1KDX2`; production untouched): organisation *DURIN* `org_01M84EDF2A94SVHR4ETQJ8PYRM`; redirect URI `http://localhost:3001/callback`; permissions matching the API scopes (`organisations:read`, `payments:read|write`, `conversions:read|write`, `wallets:read|write`, `ledger:read`, `compliance:read|write`, `reconciliation:read`); roles `durin-viewer`, `durin-operator` (the built-in `admin` role maps to full access). Environment MFA/SSO policy left unchanged.
