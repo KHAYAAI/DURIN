@@ -3,8 +3,8 @@
 **Institutional digital financial infrastructure — Layer 3 of the FORGE stack.**
 One API. Multiple financial rails. A double-entry ledger as the source of truth.
 
-> **Sandbox only.** All money movement is simulated. Not production-ready. See [STATUS.md](STATUS.md)
-> for exactly what has been verified, what is simulated, and the known gaps.
+> **Not launch-ready. Sandbox only.** All money movement is simulated. See [STATUS.md](STATUS.md)
+> for what has been verified, what is simulated, and the known gaps.
 
 ## What it does today
 
@@ -19,7 +19,7 @@ Hard boundaries: DURIN holds no private keys (Layer 1) and no customer fiat depo
 
 ## Quick start
 
-Requires Node 20+ (tested on 22), pnpm, and Docker (for Postgres).
+Requires Node 22.11+, pnpm, and Docker (for Postgres).
 
 ```bash
 cp .env.example .env        # set POSTGRES_PASSWORD and DURIN_APP_PASSWORD
@@ -44,7 +44,7 @@ packages/ledger   exact decimal arithmetic + journal validation
 packages/shared   shared constants and webhook signing/verification
 infrastructure/   docker-compose (Postgres) and DB role init
 docker/           Dockerfiles (not yet built in CI)
-scripts/          bootstrap, smoke test, load test, reconciliation helper
+scripts/          bootstrap, smoke test, load test, reconciliation runner
 ```
 
 ## Development
@@ -69,7 +69,14 @@ trigger behaviour is tested exactly as deployed.
 - Provider calls with an unknown outcome are never retried or reversed automatically.
 - Never put secrets in code, `NEXT_PUBLIC_*` variables, or the repository.
 
+## Launch readiness
+
+Not launch-ready. This branch is the runnable sandbox workspace. Identity (Didit), SSO/MFA (WorkOS),
+the custody-reference ledger, reconciliation and chain strategy are on the follow-up branch
+`feat/workos-didit-production` (PR #2), which also carries the full readiness assessment.
+
 ## Docs
+
 
 [ARCHITECTURE](ARCHITECTURE.md) · [DATABASE_SCHEMA](DATABASE_SCHEMA.md) · [API_SPECIFICATION](API_SPECIFICATION.md) ·
 [IMPLEMENTATION_ROADMAP](IMPLEMENTATION_ROADMAP.md) · [HANDOFF](HANDOFF.md) · integration contracts:
