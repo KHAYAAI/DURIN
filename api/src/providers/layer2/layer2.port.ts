@@ -41,5 +41,6 @@ export interface Layer2Port {
 
   initiatePayout(params: FiatPayoutParams): Promise<FiatPayoutResult>;
 
-  getSettlementBalance?(currency: 'ZAR' | 'USD'): Promise<{ available: string }>;
+  /** What the regulated Layer 2 entity reports holding for this organisation's customers. */
+  getCustodyBalances(organisationId: string): Promise<Array<{ assetCode: string; available: string }>>;
 }

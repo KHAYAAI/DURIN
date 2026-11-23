@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { add, cmp, mul, parseDecimal, sub } from '@durin/ledger';
 import { computeQuote, getSandboxRate } from './fx.sandbox';
-import { buildConversionLines } from './journal-lines';
+import { fillLines, releaseLines, reserveLines, settleLines } from './journal-lines';
 
 describe('sandbox FX', () => {
   it('returns rate for ZAR→USDC', () => {
@@ -32,40 +32,38 @@ describe('sandbox FX', () => {
   });
 });
 
-describe('buildConversionLines', () => {
-  const sums = (lines: ReturnType<typeof buildConversionLines>, asset: string, dir: 'debit' | 'credit') =>
-    lines.filter((l) => l.assetCode === asset && l.direction === dir).reduce((s, l) => add(s, l.amount), '0');
+describe('conversion journals', () => {
+  const a = {
+    srcCustomer: 'sc', srcInTransit: 'sit', srcLp: 'slp', srcFee: 'sf', srcCustody: 'scu',
+    tgtCustomer: 'tc', tgtLp: 'tlp', tgtCustody: 'tcu',
+  };
+  const params = { sourceAsset: 'USDC', targetAsset: 'ZAR', source: '100', fee: '0.3', target: '1840.5' };
+  const sums = (lines: Array<{ amount: string; assetCode: string; direction: string }>, asset: string, dir: string) =>
+    lines.filter((l) => l.assetCode === asset && l.direction === dir).reduce((n, l) => add(n, l.amount), '0');
+  const balanced = (lines: Array<{ amount: string; assetCode: string; direction: string }>) => {
+    for (const asset of ['USDC', 'ZAR']) expect(sums(lines, asset, 'debit')).toBe(sums(lines, asset, 'credit'));
+  };
 
-  it('balances exactly per asset', () => {
-    const q = computeQuote('ZAR', 'USDC', '10000');
-    const lines = buildConversionLines({
-      sourceAsset: 'ZAR', targetAsset: 'USDC', sourceAmount: '10000', targetAmount: q.targetAmount, feeAmount: q.feeAmount,
-      sourceLiabilityId: 'sl', sourceAssetId: 'sa', targetLiabilityId: 'tl', targetAssetId: 'ta', feeRevenueId: 'fee',
-    });
-    expect(sums(lines, 'ZAR', 'debit')).toBe(sums(lines, 'ZAR', 'credit'));
-    expect(sums(lines, 'USDC', 'debit')).toBe(sums(lines, 'USDC', 'credit'));
-    expect(parseDecimal(sums(lines, 'ZAR', 'debit'))).toBe(parseDecimal('10000'));
+  it('reserve, release, fill and settle each balance per asset', () => {
+    balanced(reserveLines(a, 'USDC', '100'));
+    balanced(releaseLines(a, 'USDC', '100'));
+    balanced(fillLines(a, params));
+    balanced(settleLines(a, params));
   });
 
-  it('balances with float-hostile amounts and without a fee', () => {
-    const lines = buildConversionLines({
-      sourceAsset: 'ZAR', targetAsset: 'USDC', sourceAmount: '0.3', targetAmount: '0.1', feeAmount: '0.1',
-      sourceLiabilityId: 'sl', sourceAssetId: 'sa', targetLiabilityId: 'tl', targetAssetId: 'ta', feeRevenueId: 'fee',
-    });
-    expect(sums(lines, 'ZAR', 'debit')).toBe(sums(lines, 'ZAR', 'credit'));
-    const noFee = buildConversionLines({
-      sourceAsset: 'ZAR', targetAsset: 'USDC', sourceAmount: '5', targetAmount: '1', feeAmount: '0',
-      sourceLiabilityId: 'sl', sourceAssetId: 'sa', targetLiabilityId: 'tl', targetAssetId: 'ta', feeRevenueId: 'fee',
-    });
-    expect(noFee).toHaveLength(4);
+  it('fill credits the customer target and books the fee as revenue', () => {
+    const lines = fillLines(a, params);
+    expect(lines.find((l) => l.accountId === 'tc')).toMatchObject({ direction: 'credit', amount: '1840.5' });
+    expect(lines.find((l) => l.accountId === 'sf')).toMatchObject({ direction: 'credit', amount: '0.3' });
+  });
+
+  it('with no fee there is no fee line', () => {
+    const lines = fillLines(a, { ...params, fee: '0' });
+    expect(lines.some((l) => l.accountId === 'sf')).toBe(false);
+    balanced(lines);
   });
 
   it('rejects a fee larger than the source amount', () => {
-    expect(() =>
-      buildConversionLines({
-        sourceAsset: 'ZAR', targetAsset: 'USDC', sourceAmount: '1', targetAmount: '1', feeAmount: '2',
-        sourceLiabilityId: 'sl', sourceAssetId: 'sa', targetLiabilityId: 'tl', targetAssetId: 'ta', feeRevenueId: 'fee',
-      }),
-    ).toThrow();
+    expect(() => fillLines(a, { ...params, fee: '101' })).toThrow('Fee exceeds source amount');
   });
 });

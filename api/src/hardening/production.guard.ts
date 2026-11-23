@@ -35,6 +35,7 @@ export class ProductionSafety implements OnModuleInit {
     } else {
       if ((process.env.LAYER1_ADAPTER || 'sandbox') === 'sandbox') errors.push('LAYER1_ADAPTER must not be sandbox in production');
       if ((process.env.LAYER2_ADAPTER || 'sandbox') === 'sandbox') errors.push('LAYER2_ADAPTER must not be sandbox in production');
+      if ((process.env.LIQUIDITY_ADAPTER || 'sandbox') === 'sandbox') errors.push('LIQUIDITY_ADAPTER must not be sandbox in production');
     }
 
     if (errors.length) {

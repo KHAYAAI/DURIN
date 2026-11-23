@@ -7,6 +7,8 @@ export const WEBHOOK_EVENT_TYPES = [
   'withdrawal.submitted',
   'withdrawal.failed',
   'withdrawal.processing',
+  'reconciliation.break_detected',
+  'verification.updated',
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

@@ -10,6 +10,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { WebhookDeliveryService } from '../webhooks/webhook-delivery.service';
 import { assertPositiveAmount } from '../common/money';
+import { ensureCustodyRef, ensureCustomer } from '../ledger/chart';
+import { sandboxCustody } from '../providers/sandbox-custody';
 import { assertSandboxOnly } from '../common/sandbox';
 
 const SUPPORTED_ASSETS = new Set(['USDC', 'USDT', 'ZAR']);
@@ -144,6 +146,7 @@ export class PaymentsService {
       },
       `pi-settle-${intent.id}`,
     );
+    sandboxCustody.creditOnce(`pi-settle-${intent.id}`, organisationId, intent.assetCode, amount);
 
     const updated = await this.prisma.paymentIntent.update({
       where: { id: intent.id },
@@ -220,21 +223,10 @@ export class PaymentsService {
     return this.serializeLink(link);
   }
 
-  /** Ensure platform settlement accounts exist for the asset (auto-provision in sandbox). */
+  /** Custody-reference + customer accounts for the asset (see ledger/chart.ts). */
   private async ensureSettlementAccounts(organisationId: string, assetCode: string) {
-    const code = assetCode.toUpperCase();
-    const assetAccount = await this.ledger.ensureAccount(organisationId, {
-      code: `SETTLEMENT-ASSET-${code}`,
-      name: `Settlement asset ${code}`,
-      accountType: 'asset',
-      assetCode: code,
-    });
-    const liabilityAccount = await this.ledger.ensureAccount(organisationId, {
-      code: `SETTLEMENT-LIAB-${code}`,
-      name: `Customer liability ${code}`,
-      accountType: 'liability',
-      assetCode: code,
-    });
+    const assetAccount = await ensureCustodyRef(this.ledger, organisationId, assetCode);
+    const liabilityAccount = await ensureCustomer(this.ledger, organisationId, assetCode);
     return { assetAccount, liabilityAccount };
   }
 

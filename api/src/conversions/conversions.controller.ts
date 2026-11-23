@@ -65,6 +65,17 @@ export class ConversionsController {
     );
   }
 
+  /** Resolve a conversion whose liquidity-provider outcome is unknown. Never re-sends the order. */
+  @Post('conversions/:id/resolve')
+  @RequireScopes(SCOPES.CONVERSIONS_RESOLVE)
+  resolve(
+    @CurrentOrg() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() body: { confirmNotExecuted?: boolean },
+  ) {
+    return this.conversions.resolve(ctx.organisationId, id, body?.confirmNotExecuted === true ? 'not_executed' : undefined);
+  }
+
   @Get('conversions/:id')
   @RequireScopes(SCOPES.CONVERSIONS_READ)
   get(@CurrentOrg() ctx: RequestContext, @Param('id') id: string) {

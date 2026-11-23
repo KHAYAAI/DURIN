@@ -22,6 +22,7 @@ export interface DepositAddressResult {
 }
 
 export interface WithdrawalParams {
+  organisationId?: string;
   walletExternalRef: string;
   assetCode: string;
   amount: string;
@@ -51,6 +52,8 @@ export interface Layer1Port {
   createWallet(params: CreateWalletParams): Promise<{ externalRef: string }>;
   createDepositAddress(params: CreateAddressParams): Promise<DepositAddressResult>;
   getBalances(walletExternalRef: string): Promise<AssetBalance[]>;
+  /** What the custodian itself reports holding for this organisation's customers (used by reconciliation). */
+  getCustodyBalances(organisationId: string): Promise<Array<{ assetCode: string; available: string }>>;
   requestWithdrawal(params: WithdrawalParams): Promise<WithdrawalResult>;
   /** Sandbox helper: simulate an inbound deposit detection */
   simulateDeposit?(params: {

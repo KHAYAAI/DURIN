@@ -24,11 +24,13 @@ enum MembershipRole {
 }
 
 model Organisation {
-  id        String             @id @default(uuid()) @db.Uuid
-  name      String
-  status    OrganisationStatus @default(active)
-  createdAt DateTime           @default(now()) @map("created_at")
-  updatedAt DateTime           @updatedAt @map("updated_at")
+  id                   String             @id @default(uuid()) @db.Uuid
+  name                 String
+  status               OrganisationStatus @default(active)
+  /// The WorkOS organization whose members may sign in to this organisation (SSO / AuthKit).
+  workosOrganizationId String?            @unique @map("workos_organization_id")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
 
   members            OrganisationMember[]
   apiKeys            ApiKey[]
@@ -168,6 +170,10 @@ model LedgerAccount {
   accountType    AccountType @map("account_type")
   assetCode      String      @map("asset_code")
   allowNegative  Boolean     @default(false) @map("allow_negative")
+  /// customer | reserved | in_transit | custody_ref | lp_clearing | fee_revenue (see ledger/chart.ts)
+  role           String?
+  /// For custody_ref accounts: which layer holds the real funds (layer1 = crypto custody, layer2 = regulated fiat)
+  custodian      String?
   status         String      @default("active")
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
@@ -335,22 +341,30 @@ model Quote {
 }
 
 model Conversion {
-  id             String           @id @default(uuid()) @db.Uuid
-  organisationId String           @map("organisation_id") @db.Uuid
-  quoteId        String           @map("quote_id") @db.Uuid
-  sourceAsset    String           @map("source_asset")
-  targetAsset    String           @map("target_asset")
-  sourceAmount   Decimal          @map("source_amount") @db.Decimal(36, 18)
-  targetAmount   Decimal          @map("target_amount") @db.Decimal(36, 18)
-  rate           Decimal          @db.Decimal(36, 18)
-  feeAmount      Decimal          @map("fee_amount") @db.Decimal(36, 18)
-  status         ConversionStatus @default(accepted)
-  journalId      String?          @map("journal_id") @db.Uuid
-  idempotencyKey String?          @map("idempotency_key")
-  failureReason  String?          @map("failure_reason")
-  settledAt      DateTime?        @map("settled_at")
-  createdAt      DateTime         @default(now()) @map("created_at")
-  updatedAt      DateTime         @updatedAt @map("updated_at")
+  id               String           @id @default(uuid()) @db.Uuid
+  organisationId   String           @map("organisation_id") @db.Uuid
+  quoteId          String           @map("quote_id") @db.Uuid
+  sourceAsset      String           @map("source_asset")
+  targetAsset      String           @map("target_asset")
+  sourceAmount     Decimal          @map("source_amount") @db.Decimal(36, 18)
+  targetAmount     Decimal          @map("target_amount") @db.Decimal(36, 18)
+  rate             Decimal          @db.Decimal(36, 18)
+  feeAmount        Decimal          @map("fee_amount") @db.Decimal(36, 18)
+  status           ConversionStatus @default(accepted)
+  /// The fill journal (kept for API compatibility).
+  journalId        String?          @map("journal_id") @db.Uuid
+  reserveJournalId String?          @map("reserve_journal_id") @db.Uuid
+  fillJournalId    String?          @map("fill_journal_id") @db.Uuid
+  settleJournalId  String?          @map("settle_journal_id") @db.Uuid
+  providerRef      String?          @map("provider_ref")
+  /// True when a liquidity-provider call may or may not have executed. Funds stay reserved;
+  /// the call is never repeated and is only resolved by querying the provider.
+  providerUnknown  Boolean          @default(false) @map("provider_unknown")
+  idempotencyKey   String?          @map("idempotency_key")
+  failureReason    String?          @map("failure_reason")
+  settledAt        DateTime?        @map("settled_at")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
 
   quote Quote @relation(fields: [quoteId], references: [id])
 
@@ -451,18 +465,26 @@ enum ApprovalStatus {
 }
 
 model VerificationRecord {
-  id             String             @id @default(uuid()) @db.Uuid
-  organisationId String             @map("organisation_id") @db.Uuid
-  subjectType    String             @map("subject_type") // organisation | user | wallet
-  subjectId      String             @map("subject_id")
-  provider       String             @default("sandbox")
-  status         VerificationStatus @default(not_started)
-  level          String             @default("kyb_basic")
-  metadata       Json?
-  reviewedAt     DateTime?          @map("reviewed_at")
-  createdAt      DateTime           @default(now()) @map("created_at")
-  updatedAt      DateTime           @updatedAt @map("updated_at")
+  id              String             @id @default(uuid()) @db.Uuid
+  organisationId  String             @map("organisation_id") @db.Uuid
+  subjectType     String             @map("subject_type") // organisation | user | wallet
+  subjectId       String             @map("subject_id")
+  provider        String             @default("sandbox")
+  status          VerificationStatus @default(not_started)
+  level           String             @default("kyb_basic")
+  metadata        Json?
+  /// Provider's session id (e.g. Didit session_id). The record id is sent to the provider as vendor_data.
+  externalId      String?            @map("external_id")
+  /// The provider's own status text (e.g. "In Review"); `status` is DURIN's normalised status.
+  providerStatus  String?            @map("provider_status")
+  verificationUrl String?            @map("verification_url")
+  lastEventId     String?            @map("last_event_id")
+  expiresAt       DateTime?          @map("expires_at")
+  reviewedAt      DateTime?          @map("reviewed_at")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
 
+  @@unique([provider, externalId])
   @@index([organisationId])
   @@index([subjectType, subjectId])
   @@map("verification_records")
@@ -532,4 +554,108 @@ model AuditLog {
   @@index([organisationId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ─── Production: provider call log, reconciliation, webhooks, MFA ────────────
+
+/// Written BEFORE any external provider call (intent-before-send) and completed after, so a crash
+/// or timeout leaves an observable `sent`/`unknown` row instead of a silent gap.
+model ProviderCall {
+  id              String    @id @default(uuid()) @db.Uuid
+  organisationId  String    @map("organisation_id") @db.Uuid
+  provider        String
+  operation       String
+  entityType      String    @map("entity_type")
+  entityId        String    @map("entity_id")
+  /// Idempotency reference sent to the provider (we use the entity id).
+  clientReference String    @map("client_reference")
+  status          String    @default("sent") // sent | succeeded | failed | unknown
+  detail          String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  completedAt     DateTime? @map("completed_at")
+
+  @@unique([provider, operation, clientReference])
+  @@index([organisationId])
+  @@index([status, createdAt])
+  @@map("provider_calls")
+}
+
+model ReconciliationRun {
+  id             String   @id @default(uuid()) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  status         String // clean | breaks
+  /// simulated (sandbox adapters) | live
+  source         String
+  summary        Json
+  checkedAt      DateTime @default(now()) @map("checked_at")
+
+  breaks ReconciliationBreak[]
+
+  @@index([organisationId, checkedAt])
+  @@map("reconciliation_runs")
+}
+
+model ReconciliationBreak {
+  id             String   @id @default(uuid()) @db.Uuid
+  runId          String   @map("run_id") @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  assetCode      String   @map("asset_code")
+  custodian      String
+  /// custody_mismatch | insolvent | provider_error
+  kind           String
+  ledgerAmount   Decimal  @map("ledger_amount") @db.Decimal(36, 18)
+  reportedAmount Decimal? @map("reported_amount") @db.Decimal(36, 18)
+  delta          Decimal? @db.Decimal(36, 18)
+  status         String   @default("open") // open | acknowledged
+  note           String?
+  acknowledgedBy String?  @map("acknowledged_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  run ReconciliationRun @relation(fields: [runId], references: [id])
+
+  @@index([organisationId, status])
+  @@map("reconciliation_breaks")
+}
+
+/// De-duplicates provider webhooks (e.g. Didit `event_id`): at-least-once delivery, exactly-once effect.
+model ProcessedWebhookEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  provider   String
+  eventId    String   @map("event_id")
+  receivedAt DateTime @default(now()) @map("received_at")
+
+  @@unique([provider, eventId])
+  @@map("processed_webhook_events")
+}
+
+/// A TOTP challenge started by a signed-in user, bound to their WorkOS session.
+model MfaChallenge {
+  id                String   @id @default(uuid()) @db.Uuid
+  organisationId    String   @map("organisation_id") @db.Uuid
+  userId            String   @map("user_id")
+  sessionId         String   @map("session_id")
+  factorId          String   @map("factor_id")
+  workosChallengeId String   @map("workos_challenge_id")
+  attempts          Int      @default(0)
+  status            String   @default("pending") // pending | verified | failed | expired
+  expiresAt         DateTime @map("expires_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([userId, sessionId])
+  @@map("mfa_challenges")
+}
+
+/// Short-lived, session-bound proof that a user completed a TOTP challenge. WorkOS access tokens
+/// carry no MFA claim, so DURIN records this itself and checks it before sensitive actions.
+model MfaVerification {
+  id             String   @id @default(uuid()) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  userId         String   @map("user_id")
+  sessionId      String   @map("session_id")
+  factorId       String   @map("factor_id")
+  verifiedAt     DateTime @default(now()) @map("verified_at")
+  expiresAt      DateTime @map("expires_at")
+
+  @@index([userId, sessionId, expiresAt])
+  @@map("mfa_verifications")
 }

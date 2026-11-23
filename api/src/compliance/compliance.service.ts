@@ -30,6 +30,16 @@ export class ComplianceService {
     return this.serVerification(record);
   }
 
+  /** Live gate: the organisation must hold an approved KYB from a real provider (never the sandbox). */
+  async assertOrganisationVerified(organisationId: string): Promise<void> {
+    const rec = await this.prisma.verificationRecord.findFirst({
+      where: { organisationId, status: 'approved', provider: { not: 'sandbox' }, level: { startsWith: 'kyb' } },
+    });
+    if (!rec) {
+      throw new ForbiddenException({ code: 'KYB_REQUIRED', message: 'Organisation has no approved KYB verification.' });
+    }
+  }
+
   /** Sandbox: auto-approve after create for demo flows */
   async simulateApproveVerification(organisationId: string, id: string) {
     // A tenant must never be able to approve its own KYB/KYC. Sandbox only.

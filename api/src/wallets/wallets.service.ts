@@ -15,6 +15,8 @@ import { Layer1Port } from '../providers/layer1/layer1.port';
 import { ComplianceService } from '../compliance/compliance.service';
 import { WebhookDeliveryService } from '../webhooks/webhook-delivery.service';
 import { assertPositiveAmount } from '../common/money';
+import { ensureCustodyRef, ensureCustomer } from '../ledger/chart';
+import { sandboxCustody } from '../providers/sandbox-custody';
 import { assertSandboxOnly } from '../common/sandbox';
 import { parseDecimal } from '@durin/ledger';
 
@@ -136,18 +138,8 @@ export class WalletsService {
       : { detected: true, txHash: '0xsimulated' };
 
     // Credit platform settlement accounts (same pattern as payment settle)
-    const assetAcc = await this.ledger.ensureAccount(organisationId, {
-      code: `SETTLEMENT-ASSET-${addr.assetCode}`,
-      name: `Settlement asset ${addr.assetCode}`,
-      accountType: 'asset',
-      assetCode: addr.assetCode,
-    });
-    const liabAcc = await this.ledger.ensureAccount(organisationId, {
-      code: `SETTLEMENT-LIAB-${addr.assetCode}`,
-      name: `Customer liability ${addr.assetCode}`,
-      accountType: 'liability',
-      assetCode: addr.assetCode,
-    });
+    const assetAcc = await ensureCustodyRef(this.ledger, organisationId, addr.assetCode);
+    const liabAcc = await ensureCustomer(this.ledger, organisationId, addr.assetCode);
 
     const journal = await this.ledger.postJournal(
       organisationId,
@@ -171,6 +163,7 @@ export class WalletsService {
       },
       `dep-${addr.id}-${detection.txHash}`,
     );
+    sandboxCustody.creditOnce(`dep-${addr.id}-${detection.txHash}`, organisationId, addr.assetCode, amount);
 
     return {
       detected: detection.detected,
@@ -228,10 +221,10 @@ export class WalletsService {
     }
 
     const assetAcc = await this.prisma.ledgerAccount.findUnique({
-      where: { organisationId_code: { organisationId, code: `SETTLEMENT-ASSET-${assetCode}` } },
+      where: { organisationId_code: { organisationId, code: `CUSTODY-REF-${assetCode}` } },
     });
     const liabAcc = await this.prisma.ledgerAccount.findUnique({
-      where: { organisationId_code: { organisationId, code: `SETTLEMENT-LIAB-${assetCode}` } },
+      where: { organisationId_code: { organisationId, code: `CUST-LIAB-${assetCode}` } },
     });
     if (!assetAcc || !liabAcc) {
       throw new BadRequestException('No settlement accounts for asset — deposit or payment settle first');
@@ -296,6 +289,7 @@ export class WalletsService {
     let remote;
     try {
       remote = await this.layer1.requestWithdrawal({
+        organisationId,
         walletExternalRef: wallet.externalRef,
         assetCode,
         amount,

@@ -47,6 +47,8 @@ type AccountSpec = {
   accountType: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense' | 'system';
   assetCode: string;
   allowNegative?: boolean;
+  role?: string;
+  custodian?: 'layer1' | 'layer2';
 };
 
 /**
@@ -75,6 +77,8 @@ export class LedgerService {
           accountType: data.accountType,
           assetCode: data.assetCode.toUpperCase(),
           allowNegative: data.allowNegative ?? false,
+          role: data.role,
+          custodian: data.custodian,
         },
         include: { balances: true },
       });
@@ -113,6 +117,8 @@ export class LedgerService {
           accountType: spec.accountType,
           assetCode,
           allowNegative: spec.allowNegative ?? false,
+          role: spec.role,
+          custodian: spec.custodian,
         },
       });
     } catch (e: unknown) {

@@ -37,7 +37,7 @@ afterAll(async () => {
 
 const integrity = async (orgId: string) => (await ledger.integrityReport(orgId)).healthy;
 const liab = async (orgId: string, asset: string) => {
-  const acc = await prisma.ledgerAccount.findUnique({ where: { organisationId_code: { organisationId: orgId, code: `SETTLEMENT-LIAB-${asset}` } }, include: { balances: true } });
+  const acc = await prisma.ledgerAccount.findUnique({ where: { organisationId_code: { organisationId: orgId, code: `CUST-LIAB-${asset}` } }, include: { balances: true } });
   return acc?.balances[0]?.available.toFixed() ?? 'none';
 };
 
@@ -279,7 +279,7 @@ describe('conversions (sandbox)', () => {
     const settled = results.filter((r) => r.status === 201 && r.body.status === 'settled');
     expect(settled).toHaveLength(1);
     expect(await prisma.conversion.count({ where: { organisationId: orgId, quoteId: quote.id, status: 'settled' } })).toBe(1);
-    expect(await prisma.journal.count({ where: { organisationId: orgId, reference: `conversion:quote:${quote.id}` } })).toBe(1);
+    expect(await prisma.journal.count({ where: { organisationId: orgId, reference: { startsWith: `conversion:` , endsWith: ":fill" } } })).toBe(1);
     expect(await liab(orgId, 'USDC')).toBe(quote.targetAmount);
     expect(await integrity(orgId)).toBe(true);
   });

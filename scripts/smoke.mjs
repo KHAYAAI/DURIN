@@ -59,7 +59,7 @@ const over = await call('POST', '/v1/withdrawals', { walletId: wallet.body.id, a
 check('overdraw is refused', over.status === 400 && over.body.code === 'NEGATIVE_BALANCE');
 
 const accounts = await call('GET', '/v1/accounts');
-const usdc = accounts.body.find((a) => a.code === 'SETTLEMENT-LIAB-USDC');
+const usdc = accounts.body.find((a) => a.code === 'CUST-LIAB-USDC');
 check('customer USDC balance = 250 + 538.91838 + 100 - 40', usdc?.balances.available === '848.91838', JSON.stringify(usdc?.balances));
 
 const integrity = await call('GET', '/v1/ledger/integrity');

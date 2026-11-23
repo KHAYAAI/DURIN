@@ -31,12 +31,18 @@ importers:
       '@prisma/client':
         specifier: ^6.1.0
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
+      '@workos-inc/node':
+        specifier: ^12.4.0
+        version: 12.4.0
       class-transformer:
         specifier: ^0.5.1
         version: 0.5.1
       class-validator:
         specifier: ^0.14.1
         version: 0.14.4
+      jose:
+        specifier: ^6.2.18
+        version: 6.2.18
       prisma:
         specifier: ^6.1.0
         version: 6.19.3(typescript@5.9.3)
@@ -98,6 +104,9 @@ importers:
 
   dashboard:
     dependencies:
+      '@workos-inc/authkit-nextjs':
+        specifier: ^4.6.3
+        version: 4.6.3(@workos-inc/node@12.4.0)(next@14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       next:
         specifier: ^14.2.18
         version: 14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -738,6 +747,10 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@sindresorhus/fnv1a@3.1.0':
+    resolution: {integrity: sha512-KV321z5m/0nuAg83W1dPLy85HpHDk7Sdi4fJbwvacWsEhAh+rZUW4ZfGcXmUIvjZg4ss2bcwNlRhJ7GBEUG08w==}
+    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
+
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
@@ -1054,6 +1067,19 @@ packages:
 
   '@webassemblyjs/wast-printer@1.14.1':
     resolution: {integrity: sha512-kPSSXE6De1XOR820C90RIo2ogvZG+c3KiHzqUoO/F34Y2shGzesfqv7o57xrxovZJH/MetF5UjroJ/R/3isoiw==}
+
+  '@workos-inc/authkit-nextjs@4.6.3':
+    resolution: {integrity: sha512-sLTHU/SHJEpyF4pR0T+JHdetJigz7PFR1OFd6H+DHMHS0eW6KxZIRlVZLLI0QnKUXePwbFWbIWloJUvAHeT06w==}
+    engines: {node: '>=22.11.0'}
+    peerDependencies:
+      '@workos-inc/node': ^9.0.0 || ^10.0.0 || ^11.0.0 || ^12.0.0
+      next: ^13.5.9 || ^14.2.26 || ^15.2.3 || ^16
+      react: ^18.0 || ^19.0.0
+      react-dom: ^18.0 || ^19.0.0
+
+  '@workos-inc/node@12.4.0':
+    resolution: {integrity: sha512-bFpXWRTc4HR3uRaaB1mZiq5tl7aR4MVaao45b4GxEfgK8aLEjHI01oPStn7AjW7iQt8S6vSO2igFBF/MkPhyRg==}
+    engines: {node: '>=22.11.0'}
 
   '@xtuc/ieee754@1.2.0':
     resolution: {integrity: sha512-DX8nKgqcGwsc0eJSqYt5lwP4DH5FlHnmuWWBRy7X0NcaGR0ZtuyeESgMwTYVEtxmsNGY+qit4QYT/MIYTOTPeA==}
@@ -1869,6 +1895,12 @@ packages:
     resolution: {integrity: sha512-0KI/607xoxSToH7GjN1FfSbLoU0+btTicjsQSWQlh/hZykN8KpmMf7uYwPW3R+akZ6R/w18ZlXSHBYXiYUPO3g==}
     engines: {node: '>= 0.10'}
 
+  iron-session@8.0.4:
+    resolution: {integrity: sha512-9ivNnaKOd08osD0lJ3i6If23GFS2LsxyMU8Gf/uBUEgm8/8CC1hrrCHFDpMo3IFbpBgwoo/eairRsaD3c5itxA==}
+
+  iron-webcrypto@1.2.1:
+    resolution: {integrity: sha512-feOM6FaSr6rEABp/eDfVseKyTMDt+KGpeB35SkVn9Tyn0CqvVsY3EwI0v5i8nMHyJnzCIQf7nsy3p41TPkJZhg==}
+
   is-arrayish@0.2.1:
     resolution: {integrity: sha512-zz06S8t0ozoDXMG+ube26zeCTNXcKIPJZJi8hBrF4idCLms4CG9QtK7qBl1boi5ODzFpjswb5JPmHCbMpjaYzg==}
 
@@ -1917,6 +1949,12 @@ packages:
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
+
+  jose@5.10.0:
+    resolution: {integrity: sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==}
+
+  jose@6.2.18:
+    resolution: {integrity: sha512-doV4thUwgkrycJH4yLeqwTGIIZphHl+pk7CPReuMIhYhncmgzdko85MaCG4YQFTxqMFr1/oEH32tZuKKovcDEg==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -2234,6 +2272,9 @@ packages:
 
   path-to-regexp@3.3.0:
     resolution: {integrity: sha512-qyCH421YQPS2WFDxDjftfc1ZR5WKQzVzqsp4n9M2kQhVOo/ByahFoUNJfl58kOcEGfQ//7weFTDhm+ss8Ecxgw==}
+
+  path-to-regexp@6.3.0:
+    resolution: {integrity: sha512-Yhpw4T9C6hPpgPeA28us07OJeqZ5EzQTkbfwuhsUg0c237RomFoETJgmp2sa3F/41gfLE6G5cqcYwznmeEeOlQ==}
 
   path-type@4.0.0:
     resolution: {integrity: sha512-gDKb8aZMDeD/tZWs9P6+q0J9Mwkdl6xMV8TjnGP3qJVJ06bdMgkbBlLU8IdfOsIsFz2BW1rNVT3XuNEl8zPAvw==}
@@ -2736,6 +2777,9 @@ packages:
     resolution: {integrity: sha512-8iAasVS4wUx0gPLjH8Xtz2PeDzTSiy8QiLGu2DT3X5GU+egFEQhpnbtkehbAwjvDcxIERmCYcysiODFmE3Ud0Q==}
     engines: {node: '>=18'}
 
+  uncrypto@0.1.3:
+    resolution: {integrity: sha512-Ql87qFHB3s/De2ClA9e0gsnS6zXG27SkTiSJwjCc9MebbfapQfuPzumMIUMi38ezPZVNFcHI9sUIepeQfw8J8Q==}
+
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
@@ -2810,6 +2854,14 @@ packages:
 
   v8-compile-cache-lib@3.0.1:
     resolution: {integrity: sha512-wa7YjyUGfNZngI/vtK0UHAN+lgDCxBPCylVXGp0zu59Fz5aiGtNXaq3DhIov063MorB+VfufLh3JlF2KdTK3xg==}
+
+  valibot@1.5.0:
+    resolution: {integrity: sha512-nil6AkP2TChWL43Z5uJ6GTxX01CUA+g8LWUM+N/rB9NBbkUMaUsi9PUNzlUPgoKASgmx9f7eGOYpJ04/fSa6FQ==}
+    peerDependencies:
+      typescript: '>=5'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   validator@13.15.35:
     resolution: {integrity: sha512-TQ5pAGhd5whStmqWvYF4OjQROlmv9SMFVt37qoCBdqRffuuklWYQlCNnEs2ZaIBD1kZRNnikiZOS1eqgkar0iw==}
@@ -3473,6 +3525,8 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.68.8':
     optional: true
 
+  '@sindresorhus/fnv1a@3.1.0': {}
+
   '@standard-schema/spec@1.1.0': {}
 
   '@swc/core-darwin-arm64@1.16.22':
@@ -3852,6 +3906,23 @@ snapshots:
     dependencies:
       '@webassemblyjs/ast': 1.14.1
       '@xtuc/long': 4.2.2
+
+  '@workos-inc/authkit-nextjs@4.6.3(@workos-inc/node@12.4.0)(next@14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@sindresorhus/fnv1a': 3.1.0
+      '@workos-inc/node': 12.4.0
+      iron-session: 8.0.4
+      jose: 5.10.0
+      next: 14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      path-to-regexp: 6.3.0
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+      server-only: 0.0.1
+      valibot: 1.5.0(typescript@5.9.3)
+    transitivePeerDependencies:
+      - typescript
+
+  '@workos-inc/node@12.4.0': {}
 
   '@xtuc/ieee754@1.2.0': {}
 
@@ -4730,6 +4801,14 @@ snapshots:
 
   ipaddr.js@1.9.1: {}
 
+  iron-session@8.0.4:
+    dependencies:
+      cookie: 0.7.2
+      iron-webcrypto: 1.2.1
+      uncrypto: 0.1.3
+
+  iron-webcrypto@1.2.1: {}
+
   is-arrayish@0.2.1: {}
 
   is-binary-path@2.1.0:
@@ -4767,6 +4846,10 @@ snapshots:
       supports-color: 8.1.1
 
   jiti@2.7.0: {}
+
+  jose@5.10.0: {}
+
+  jose@6.2.18: {}
 
   js-tokens@4.0.0: {}
 
@@ -5042,6 +5125,8 @@ snapshots:
   path-to-regexp@0.1.13: {}
 
   path-to-regexp@3.3.0: {}
+
+  path-to-regexp@6.3.0: {}
 
   path-type@4.0.0: {}
 
@@ -5531,6 +5616,8 @@ snapshots:
 
   uint8array-extras@1.6.0: {}
 
+  uncrypto@0.1.3: {}
+
   undici-types@6.21.0: {}
 
   undici@6.29.1: {}
@@ -5584,6 +5671,10 @@ snapshots:
   utils-merge@1.0.1: {}
 
   v8-compile-cache-lib@3.0.1: {}
+
+  valibot@1.5.0(typescript@5.9.3):
+    optionalDependencies:
+      typescript: 5.9.3
 
   validator@13.15.35: {}
 

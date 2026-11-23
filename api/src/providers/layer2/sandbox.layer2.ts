@@ -1,4 +1,5 @@
 import { randomBytes } from 'crypto';
+import { sandboxCustody } from '../sandbox-custody';
 import {
   FiatDepositInstruction,
   FiatPayoutParams,
@@ -38,7 +39,7 @@ export class SandboxLayer2Adapter implements Layer2Port {
     };
   }
 
-  async getSettlementBalance(_currency: 'ZAR' | 'USD') {
-    return { available: '0.00' };
+  async getCustodyBalances(organisationId: string) {
+    return sandboxCustody.assets(organisationId).filter((a) => a === 'ZAR' || a === 'USD').map((assetCode) => ({ assetCode, available: sandboxCustody.get(organisationId, assetCode) }));
   }
 }

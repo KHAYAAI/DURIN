@@ -1,10 +1,15 @@
 /**
- * Build balanced multi-asset conversion journal lines.
- * Source legs sum to 0 net; target legs sum to 0 net. Exact decimal arithmetic only.
+ * Conversion journals (custody-reference model; see ledger/chart.ts).
  *
- * SANDBOX ACCOUNTING ONLY: this models a pure settlement-account swap for demos. A live
- * conversion needs liquidity-provider clearing accounts and receivables (see DATABASE_SCHEMA
- * conversion journals) and must be redesigned before gate G1 opens.
+ *  reserve:  Dr CUST-LIAB-src S          / Cr CONV-INTRANSIT-src S
+ *  release:  Dr CONV-INTRANSIT-src S     / Cr CUST-LIAB-src S             (LP rejected / not executed)
+ *  fill:     src: Dr CONV-INTRANSIT-src S / Cr LP-CLEARING-src N, Cr FEE-REVENUE-src F
+ *            tgt: Dr LP-CLEARING-tgt T    / Cr CUST-LIAB-tgt T            (customer credited on DELIVERY)
+ *  settle:   src: Dr LP-CLEARING-src N    / Cr CUSTODY-REF-src N          (funds left custody)
+ *            tgt: Dr CUSTODY-REF-tgt T    / Cr LP-CLEARING-tgt T          (funds arrived in custody)
+ *
+ * S = source amount, F = fee, N = S - F (sent to the LP), T = target amount. Each journal balances
+ * per asset. Exact decimal arithmetic only.
  */
 import { cmp, sub } from '@durin/ledger';
 
@@ -15,35 +20,46 @@ export interface SimpleLine {
   assetCode: string;
 }
 
-export function buildConversionLines(params: {
-  sourceAsset: string;
-  targetAsset: string;
-  sourceAmount: string;
-  targetAmount: string;
-  feeAmount: string;
-  sourceLiabilityId: string;
-  sourceAssetId: string;
-  targetLiabilityId: string;
-  targetAssetId: string;
-  feeRevenueId: string;
-}): SimpleLine[] {
-  const net = sub(params.sourceAmount, params.feeAmount);
-  if (cmp(net, '0') < 0) throw new Error('Fee exceeds source amount');
-  const hasFee = cmp(params.feeAmount, '0') > 0;
+export interface ConversionAccounts {
+  srcCustomer: string; srcInTransit: string; srcLp: string; srcFee: string; srcCustody: string;
+  tgtCustomer: string; tgtLp: string; tgtCustody: string;
+}
 
-  const lines: SimpleLine[] = [
-    { accountId: params.sourceLiabilityId, direction: 'debit', amount: params.sourceAmount, assetCode: params.sourceAsset },
+export function reserveLines(a: ConversionAccounts, asset: string, source: string): SimpleLine[] {
+  return [
+    { accountId: a.srcCustomer, direction: 'debit', amount: source, assetCode: asset },
+    { accountId: a.srcInTransit, direction: 'credit', amount: source, assetCode: asset },
   ];
+}
 
-  if (hasFee) {
-    lines.push({ accountId: params.sourceAssetId, direction: 'credit', amount: net, assetCode: params.sourceAsset });
-    lines.push({ accountId: params.feeRevenueId, direction: 'credit', amount: params.feeAmount, assetCode: params.sourceAsset });
-  } else {
-    lines.push({ accountId: params.sourceAssetId, direction: 'credit', amount: params.sourceAmount, assetCode: params.sourceAsset });
+export function releaseLines(a: ConversionAccounts, asset: string, source: string): SimpleLine[] {
+  return [
+    { accountId: a.srcInTransit, direction: 'debit', amount: source, assetCode: asset },
+    { accountId: a.srcCustomer, direction: 'credit', amount: source, assetCode: asset },
+  ];
+}
+
+export function fillLines(a: ConversionAccounts, p: { sourceAsset: string; targetAsset: string; source: string; fee: string; target: string }): SimpleLine[] {
+  const net = sub(p.source, p.fee);
+  if (cmp(net, '0') < 0) throw new Error('Fee exceeds source amount');
+  const lines: SimpleLine[] = [
+    { accountId: a.srcInTransit, direction: 'debit', amount: p.source, assetCode: p.sourceAsset },
+  ];
+  if (cmp(net, '0') > 0) lines.push({ accountId: a.srcLp, direction: 'credit', amount: net, assetCode: p.sourceAsset });
+  if (cmp(p.fee, '0') > 0) lines.push({ accountId: a.srcFee, direction: 'credit', amount: p.fee, assetCode: p.sourceAsset });
+  lines.push({ accountId: a.tgtLp, direction: 'debit', amount: p.target, assetCode: p.targetAsset });
+  lines.push({ accountId: a.tgtCustomer, direction: 'credit', amount: p.target, assetCode: p.targetAsset });
+  return lines;
+}
+
+export function settleLines(a: ConversionAccounts, p: { sourceAsset: string; targetAsset: string; source: string; fee: string; target: string }): SimpleLine[] {
+  const net = sub(p.source, p.fee);
+  const lines: SimpleLine[] = [];
+  if (cmp(net, '0') > 0) {
+    lines.push({ accountId: a.srcLp, direction: 'debit', amount: net, assetCode: p.sourceAsset });
+    lines.push({ accountId: a.srcCustody, direction: 'credit', amount: net, assetCode: p.sourceAsset });
   }
-
-  lines.push({ accountId: params.targetAssetId, direction: 'debit', amount: params.targetAmount, assetCode: params.targetAsset });
-  lines.push({ accountId: params.targetLiabilityId, direction: 'credit', amount: params.targetAmount, assetCode: params.targetAsset });
-
+  lines.push({ accountId: a.tgtCustody, direction: 'debit', amount: p.target, assetCode: p.targetAsset });
+  lines.push({ accountId: a.tgtLp, direction: 'credit', amount: p.target, assetCode: p.targetAsset });
   return lines;
 }

@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
 import { cmp, sub } from '@durin/ledger';
+import { sandboxCustody } from '../sandbox-custody';
 import {
   AssetBalance,
   CreateAddressParams,
@@ -50,12 +51,17 @@ export class SandboxLayer1Adapter implements Layer1Port {
     }));
   }
 
+  async getCustodyBalances(organisationId: string) {
+    return sandboxCustody.assets(organisationId).filter((a) => a !== 'ZAR' && a !== 'USD').map((assetCode) => ({ assetCode, available: sandboxCustody.get(organisationId, assetCode) }));
+  }
+
   async requestWithdrawal(params: WithdrawalParams): Promise<WithdrawalResult> {
     const map = this.balances.get(params.walletExternalRef) ?? new Map();
     const current = map.get(params.assetCode.toUpperCase()) ?? '0';
     // In pure sandbox we still "submit" when the simulated balance is short; the platform
     // ledger is what enforces customer funds. The simulated balance floors at zero.
     const next = cmp(current, params.amount) >= 0 ? sub(current, params.amount) : '0';
+    if (params.organisationId) sandboxCustody.debit(params.organisationId, params.assetCode, params.amount);
     const txHash = `0xsim${randomBytes(16).toString('hex')}`;
     map.set(params.assetCode.toUpperCase(), next);
     this.balances.set(params.walletExternalRef, map);
