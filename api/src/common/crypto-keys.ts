@@ -45,6 +45,9 @@ export function verifyApiKey(raw: string, stored: string): boolean {
   }
 }
 
+/** Lookup prefix: `dk_test_` + 12 random chars (~72 bits), so prefix collisions are negligible. */
+export const KEY_PREFIX_LENGTH = 20;
+
 export function keyPrefixOf(raw: string): string {
-  return raw.slice(0, 12);
+  return raw.slice(0, KEY_PREFIX_LENGTH);
 }

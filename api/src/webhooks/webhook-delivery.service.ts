@@ -1,64 +1,51 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { createHmac } from 'crypto';
+import { Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
+/**
+ * Queues webhook events. This is the only thing request handlers do: it inserts rows into the
+ * durable `webhook_deliveries` table. The WebhookWorker performs the HTTP calls, so a slow or
+ * failing customer endpoint can never block or fail an API request.
+ *
+ * Note: events are queued after the originating transaction commits, so a crash between the
+ * commit and this insert can drop an event. State is always recoverable from the API.
+ */
 @Injectable()
 export class WebhookDeliveryService {
   private readonly log = new Logger(WebhookDeliveryService.name);
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Deliver event to all active endpoints subscribed to the event type.
-   * Retries: 3 attempts with backoff. Status: implemented for sandbox.
-   */
-  async publish(organisationId: string, eventType: string, payload: unknown) {
+  /** Never throws: a webhook problem must not fail the API request that caused the event. */
+  async publish(organisationId: string, eventType: string, payload: unknown): Promise<void> {
+    try {
+      await this.enqueue(organisationId, eventType, payload);
+    } catch (e) {
+      this.log.error(`Failed to queue ${eventType}: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
+  private async enqueue(organisationId: string, eventType: string, payload: unknown): Promise<void> {
     const endpoints = await this.prisma.webhookEndpoint.findMany({
       where: { organisationId, status: 'active' },
+      select: { id: true, events: true },
     });
     const targets = endpoints.filter(
       (e) => e.events.length === 0 || e.events.includes(eventType) || e.events.includes('*'),
     );
+    if (!targets.length) return;
 
-    const body = JSON.stringify({
-      id: `evt_${Date.now()}`,
-      type: eventType,
-      created: new Date().toISOString(),
-      data: payload,
-      livemode: false,
+    const eventId = `evt_${randomUUID()}`;
+    await this.prisma.webhookDelivery.createMany({
+      data: targets.map((endpoint) => ({
+        organisationId,
+        endpointId: endpoint.id,
+        eventId,
+        eventType,
+        payload: payload as Prisma.InputJsonValue,
+      })),
+      skipDuplicates: true,
     });
-
-    const results = [];
-    for (const ep of targets) {
-      const result = await this.deliverWithRetry(ep.url, body, ep.secretHash);
-      results.push({ endpointId: ep.id, url: ep.url, ...result });
-    }
-    return results;
-  }
-
-  private async deliverWithRetry(url: string, body: string, secretHash: string) {
-    // Signature uses secret hash as key material in sandbox only — live uses stored secret
-    const sig = createHmac('sha256', secretHash).update(body).digest('hex');
-    const attempts = [0, 200, 500];
-    for (let i = 0; i < attempts.length; i++) {
-      if (attempts[i]) await new Promise((r) => setTimeout(r, attempts[i]));
-      try {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'DURIN-Signature': sig,
-            'DURIN-Event': 'true',
-          },
-          body,
-          signal: AbortSignal.timeout(5000),
-        });
-        if (res.ok) return { ok: true, status: res.status, attempts: i + 1 };
-        this.log.warn(`Webhook ${url} status ${res.status}`);
-      } catch (e) {
-        this.log.warn(`Webhook ${url} error: ${e instanceof Error ? e.message : e}`);
-      }
-    }
-    return { ok: false, status: 0, attempts: attempts.length };
   }
 }

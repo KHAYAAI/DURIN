@@ -1,8 +1,7 @@
-import { IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { IsOptional, IsString, IsUUID, Matches, MinLength } from 'class-validator';
 
 export class CreateWithdrawalDto {
-  @IsString()
-  @MinLength(1)
+  @IsUUID()
   walletId!: string;
 
   @IsString()

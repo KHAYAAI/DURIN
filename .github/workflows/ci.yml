@@ -1,0 +1,53 @@
+# Status: written to mirror the commands verified locally; not yet run on GitHub Actions.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-admin-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: ci-admin-password
+      DURIN_TEST_ADMIN_URL: postgresql://postgres:ci-admin-password@localhost:5432/durin_test
+      DURIN_TEST_APP_URL: postgresql://durin_app:ci-app-password@localhost:5432/durin_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:packages
+      - run: pnpm --filter @durin/api prisma:generate
+      - run: pnpm typecheck
+      - run: pnpm --filter @durin/api lint
+      - run: pnpm test
+      - name: Create the least-privilege runtime login
+        run: psql -d postgres -c "CREATE ROLE durin_app LOGIN PASSWORD 'ci-app-password'"
+      - name: Integration tests (real PostgreSQL, real migrations, runtime role)
+        run: pnpm test:integration
+      - run: pnpm build
+      - name: Start the built API and run the end-to-end smoke test
+        run: |
+          psql -d postgres -c "CREATE DATABASE durin_smoke"
+          MIGRATION_DATABASE_URL=postgresql://postgres:ci-admin-password@localhost:5432/durin_smoke \
+            DURIN_RUNTIME_ROLE=durin_app pnpm db:migrate
+          cd api
+          DATABASE_URL=postgresql://durin_app:ci-app-password@localhost:5432/durin_smoke PORT=3000 node dist/main.js &
+          for i in $(seq 1 30); do curl -sf localhost:3000/health && break; sleep 1; done
+          cd ..
+          node scripts/smoke.mjs http://localhost:3000

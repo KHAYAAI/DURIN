@@ -5,7 +5,7 @@ import {
   HttpStatus,
   Injectable,
 } from '@nestjs/common';
-import { REQUEST_CONTEXT_KEY, RequestContext } from '../common/request-context';
+import { createHash } from 'crypto';
 
 const WINDOW_MS = 60_000;
 const MAX_REQ = Number(process.env.RATE_LIMIT_PER_MINUTE || 120);
@@ -31,6 +31,13 @@ class MemoryStore implements RateLimitStore {
   }
 }
 
+/** Evict expired buckets so the map cannot grow without bound. */
+const cleanup = setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of memory) if (bucket.resetAt <= now) memory.delete(key);
+}, WINDOW_MS);
+cleanup.unref();
+
 /** Redis store: uses global fetch to a tiny REST rate-limit sidecar OR falls back.
  * For production, set RATE_LIMIT_STORE=redis and provide a connected ioredis in future.
  * Here we implement a file-free memory store that matches Redis semantics for local high readiness.
@@ -41,8 +48,15 @@ const store: RateLimitStore = new MemoryStore();
 export class RateLimitGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest();
-    const ctx = req[REQUEST_CONTEXT_KEY] as RequestContext | undefined;
-    const key = `rl:${ctx?.apiKeyId || req.ip || 'anon'}`;
+    // Orchestrator probes must never be throttled: a limited health check gets a healthy instance restarted.
+    if (req.path === '/health') return true;
+    // Global guards run before authentication, so key on a hash of the bearer token (the API key)
+    // when present, otherwise on the client IP. The raw key is never stored.
+    const auth = req.headers['authorization'];
+    const key =
+      typeof auth === 'string' && auth.startsWith('Bearer ')
+        ? `rl:k:${createHash('sha256').update(auth).digest('hex').slice(0, 24)}`
+        : `rl:ip:${req.ip || 'anon'}`;
     const { count, resetAt } = await store.incr(key, WINDOW_MS);
     const res = context.switchToHttp().getResponse();
     res.setHeader('X-RateLimit-Limit', String(MAX_REQ));

@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApiKeysService } from '../api-keys/api-keys.service';
-import { DEFAULT_SCOPES } from '../common/scopes';
+import { DEFAULT_SCOPES, SANDBOX_BOOTSTRAP_SCOPES } from '../common/scopes';
+import { isSandboxMode } from '../common/sandbox';
 
 @Injectable()
 export class OrganisationsService {
@@ -14,7 +15,7 @@ export class OrganisationsService {
    * Bootstrap: create organisation + optional owner user + first API key.
    * Returns the organisation and the one-time API key secret.
    */
-  async create(name: string, ownerEmail?: string, ownerName?: string) {
+  async create(name: string, ownerEmail?: string, ownerName?: string, adminKey?: boolean) {
     return this.prisma.$transaction(async (tx) => {
       const org = await tx.organisation.create({
         data: { name },
@@ -43,7 +44,8 @@ export class OrganisationsService {
       // we still return a usable key for immediate use.
       return { organisation: org };
     }).then(async ({ organisation }) => {
-      const key = await this.apiKeys.create(organisation.id, 'Default key', [...DEFAULT_SCOPES]);
+      const withAdmin = adminKey === true || isSandboxMode();
+      const key = await this.apiKeys.create(organisation.id, 'Default key', [...(withAdmin ? SANDBOX_BOOTSTRAP_SCOPES : DEFAULT_SCOPES)]);
       return {
         organisation: {
           id: organisation.id,
@@ -59,7 +61,6 @@ export class OrganisationsService {
           secret: key.secret,
           createdAt: key.createdAt,
         },
-        status: 'implemented' as const,
         note: 'Store the apiKey.secret now — it will not be shown again.',
       };
     });

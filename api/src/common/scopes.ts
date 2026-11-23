@@ -9,6 +9,9 @@ export const SCOPES = {
   PAYMENTS_WRITE: 'payments:write',
   CONVERSIONS_READ: 'conversions:read',
   CONVERSIONS_WRITE: 'conversions:write',
+  CONVERSIONS_RESOLVE: 'conversions:resolve',
+  RECONCILIATION_READ: 'reconciliation:read',
+  RECONCILIATION_WRITE: 'reconciliation:write',
   WALLETS_READ: 'wallets:read',
   WALLETS_WRITE: 'wallets:write',
   LEDGER_READ: 'ledger:read',
@@ -20,7 +23,7 @@ export const SCOPES = {
 
 export type Scope = (typeof SCOPES)[keyof typeof SCOPES];
 
-/** Default scopes for newly created API keys (includes admin for early milestones) */
+/** Default scopes for newly created API keys. `admin` is never a default. */
 export const DEFAULT_SCOPES: Scope[] = [
   SCOPES.ORGANISATIONS_READ,
   SCOPES.API_KEYS_READ,
@@ -37,5 +40,9 @@ export const DEFAULT_SCOPES: Scope[] = [
   SCOPES.WALLETS_WRITE,
   SCOPES.COMPLIANCE_READ,
   SCOPES.COMPLIANCE_WRITE,
-  SCOPES.ADMIN,
 ];
+
+/** Sandbox bootstrap keys also get admin so the whole API can be exercised end to end. */
+export const SANDBOX_BOOTSTRAP_SCOPES: Scope[] = [...DEFAULT_SCOPES, SCOPES.ADMIN];
+
+export const ALL_SCOPES: ReadonlySet<string> = new Set(Object.values(SCOPES));

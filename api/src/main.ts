@@ -1,37 +1,19 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
-import { SecurityHeadersMiddleware } from './hardening/security.middleware';
+import { configureApp } from './app.config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  configureApp(app);
+  app.enableShutdownHooks();
 
-  // Versioned API under /v1; health remains at /health for probes
-  app.setGlobalPrefix(process.env.API_PREFIX || 'v1', {
-    exclude: ['health'],
-  });
-
-  app.use((_req: any, res: any, next: any) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Cache-Control', 'no-store');
-    next();
-  });
-
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
-
-  const port = process.env.PORT || 3000;
+  const port = Number(process.env.PORT || 3000);
   await app.listen(port);
-  console.log(`DURIN API listening on http://localhost:${port}`);
-  console.log(`Health: GET http://localhost:${port}/health`);
-  console.log(`Status: M0 Foundations — scaffold only`);
+  const log = new Logger('Bootstrap');
+  log.log(`DURIN API listening on :${port}  (health: /health, version: /v1/version)`);
+  log.log(`Mode: ${process.env.NODE_ENV === 'production' ? 'production' : 'sandbox — all money movement is simulated'}`);
 }
 
-bootstrap();
+void bootstrap();

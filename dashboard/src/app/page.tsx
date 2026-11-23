@@ -9,16 +9,20 @@ export default async function OverviewPage() {
 
   if (isConfigured()) {
     try {
-      const [a, p, c, ap] = await Promise.all([
-        durinFetch<unknown[]>('/accounts').catch(() => []),
-        durinFetch<unknown[]>('/payment_intents').catch(() => []),
-        durinFetch<unknown[]>('/conversions').catch(() => []),
-        durinFetch<unknown[]>('/compliance/approvals').catch(() => []),
+      // Failures are surfaced, never turned into zeros: an outage must not look like an empty ledger.
+      const results = await Promise.allSettled([
+        durinFetch<unknown[]>('/accounts'),
+        durinFetch<unknown[]>('/payment_intents'),
+        durinFetch<unknown[]>('/conversions'),
+        durinFetch<unknown[]>('/compliance/approvals'),
       ]);
-      accounts = Array.isArray(a) ? a : [];
-      payments = Array.isArray(p) ? p : [];
-      conversions = Array.isArray(c) ? c : [];
-      approvals = Array.isArray(ap) ? ap : [];
+      const list = (r: PromiseSettledResult<unknown[]>) => (r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []);
+      accounts = list(results[0]);
+      payments = list(results[1]);
+      conversions = list(results[2]);
+      approvals = list(results[3]);
+      const failed = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+      if (failed.length) error = `${failed.length} of 4 requests failed (${failed[0]!.reason instanceof Error ? failed[0]!.reason.message : 'unknown error'})`;
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load';
     }
@@ -52,8 +56,8 @@ export default async function OverviewPage() {
       </div>
       {!isConfigured() && (
         <div className="note">
-          Set <code>NEXT_PUBLIC_DURIN_API_URL</code> (e.g. http://localhost:3000/v1) and{' '}
-          <code>NEXT_PUBLIC_DURIN_API_KEY</code> to load live sandbox data.
+          Set <code>DURIN_API_URL</code> (e.g. http://localhost:3000/v1) and{' '}
+          <code>DURIN_API_KEY</code> to load live sandbox data.
         </div>
       )}
       {error && <div className="note">API error: {error}</div>}

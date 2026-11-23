@@ -6,7 +6,7 @@ describe('crypto-keys', () => {
   it('generates dk_test secrets', () => {
     const s = generateApiKeySecret('test');
     expect(s.startsWith('dk_test_')).toBe(true);
-    expect(keyPrefixOf(s).length).toBe(12);
+    expect(keyPrefixOf(s).length).toBe(20);
   });
 
   it('scrypt hash verifies', () => {

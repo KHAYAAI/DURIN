@@ -1,4 +1,5 @@
 import { randomBytes } from 'crypto';
+import { sandboxCustody } from '../sandbox-custody';
 import {
   FiatDepositInstruction,
   FiatPayoutParams,
@@ -31,14 +32,14 @@ export class SandboxLayer2Adapter implements Layer2Port {
     };
   }
 
-  async initiatePayout(params: FiatPayoutParams): Promise<FiatPayoutResult> {
+  async initiatePayout(_params: FiatPayoutParams): Promise<FiatPayoutResult> {
     return {
       providerRef: `fm_pay_${randomBytes(6).toString('hex')}`,
       status: 'settled',
     };
   }
 
-  async getSettlementBalance(currency: 'ZAR' | 'USD') {
-    return { available: '0.00' };
+  async getCustodyBalances(organisationId: string) {
+    return { asOf: new Date(), balances: sandboxCustody.assets(organisationId).filter((a) => a === 'ZAR' || a === 'USD').map((assetCode) => ({ assetCode, available: sandboxCustody.get(organisationId, assetCode) })) };
   }
 }

@@ -1,3 +1,6 @@
+import { IsString, Matches } from 'class-validator';
+import { listEnabledChains } from '../chains/chain-policy';
+import { RequireMfa } from '../auth/mfa.decorator';
 import {
   Body,
   Controller,
@@ -18,6 +21,9 @@ import { RequestContext } from '../common/request-context';
 import { SCOPES } from '../common/scopes';
 
 class SimulateDepositDto {
+  /** Decimal string, e.g. "50.00" */
+  @IsString()
+  @Matches(/^\d+(\.\d+)?$/)
   amount!: string;
 }
 
@@ -59,6 +65,16 @@ export class WalletsController {
     );
   }
 
+  /** Chains enabled in this environment, with native token identifiers and confirmation depth. */
+  @Get('chains')
+  @RequireScopes(SCOPES.WALLETS_READ)
+  chains() {
+    return listEnabledChains().map((c) => ({
+      assetCode: c.assetCode, chain: c.chain, network: c.network, tokenContract: c.token,
+      decimals: c.decimals, confirmations: c.confirmations,
+    }));
+  }
+
   @Post('deposit_addresses/:id/simulate_deposit')
   @RequireScopes(SCOPES.WALLETS_WRITE)
   simulateDeposit(
@@ -71,6 +87,7 @@ export class WalletsController {
 
   @Post('withdrawals')
   @RequireScopes(SCOPES.WALLETS_WRITE)
+  @RequireMfa()
   withdraw(
     @CurrentOrg() ctx: RequestContext,
     @Body() dto: CreateWithdrawalDto,

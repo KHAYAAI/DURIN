@@ -1,0 +1,63 @@
+# Prometheus alerting rules for DURIN (metrics from GET /metrics; see api/src/metrics).
+# Thresholds are starting points: tune them against real traffic before relying on them.
+groups:
+  - name: durin-money
+    rules:
+      - alert: DurinConversionOutcomeUnknown
+        expr: durin_conversions_provider_unknown > 0
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: A conversion has an unknown liquidity-provider outcome (customer funds reserved)
+          runbook: ops/RUNBOOK.md#unknown-provider-outcome
+      - alert: DurinReconciliationBreak
+        expr: durin_reconciliation_open_breaks > 0
+        for: 1m
+        labels: { severity: page }
+        annotations:
+          summary: Ledger and custodian balances disagree, or custody does not cover customer balances
+          runbook: ops/RUNBOOK.md#reconciliation-break
+      - alert: DurinReconciliationStale
+        expr: durin_reconciliation_age_seconds > 3600 or durin_reconciliation_age_seconds < 0
+        for: 10m
+        labels: { severity: page }
+        annotations:
+          summary: Reconciliation has not run in over an hour (or never)
+          runbook: ops/RUNBOOK.md#reconciliation-break
+      - alert: DurinProviderCallsStale
+        expr: durin_provider_calls_stale > 0
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: A provider call has been 'sent' or 'unknown' for over 2 minutes, runbook: "ops/RUNBOOK.md#unknown-provider-outcome" }
+      - alert: DurinWithdrawalsStuck
+        expr: durin_withdrawals_stuck > 0
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: Withdrawals stuck requested/processing, runbook: "ops/RUNBOOK.md#stuck-withdrawal" }
+  - name: durin-platform
+    rules:
+      - alert: DurinWebhookBacklog
+        expr: durin_webhook_backlog > 50
+        for: 10m
+        labels: { severity: ticket }
+        annotations: { summary: Webhook deliveries overdue }
+      - alert: DurinHighErrorRate
+        expr: sum(rate(durin_http_requests_total{status="5xx"}[5m])) / sum(rate(durin_http_requests_total[5m])) > 0.02
+        for: 10m
+        labels: { severity: page }
+        annotations: { summary: ">2% of API requests are failing with 5xx" }
+      - alert: DurinSlowRequests
+        expr: histogram_quantile(0.99, sum by (le) (rate(durin_http_request_duration_seconds_bucket[5m]))) > 2.5
+        for: 10m
+        labels: { severity: ticket }
+        annotations: { summary: p99 latency above 2.5s }
+      - alert: DurinApiDown
+        expr: up{job="durin-api"} == 0
+        for: 2m
+        labels: { severity: page }
+        annotations: { summary: DURIN API is not scrapeable }
+      - alert: DurinStaleVerifications
+        expr: durin_verifications_stale > 0
+        for: 1h
+        labels: { severity: ticket }
+        annotations: { summary: KYC/KYB verifications pending for over 7 days }

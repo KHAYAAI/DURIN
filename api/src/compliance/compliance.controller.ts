@@ -1,10 +1,12 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { RequireMfa } from '../auth/mfa.decorator';
 import { ComplianceService } from './compliance.service';
 import { ApiKeyGuard } from '../auth/api-key.guard';
 import { CurrentOrg } from '../auth/current-org.decorator';
 import { RequireScopes } from '../auth/scopes.decorator';
 import { RequestContext } from '../common/request-context';
 import { SCOPES } from '../common/scopes';
+import { DecideApprovalDto, RequestApprovalDto, ScreeningDto, SetLimitDto, StartVerificationDto } from './dto/compliance.dto';
 
 @Controller('compliance')
 @UseGuards(ApiKeyGuard)
@@ -15,7 +17,7 @@ export class ComplianceController {
   @RequireScopes(SCOPES.COMPLIANCE_WRITE)
   startVerification(
     @CurrentOrg() ctx: RequestContext,
-    @Body() body: { subjectType: string; subjectId: string; level?: string },
+    @Body() body: StartVerificationDto,
   ) {
     return this.compliance.startVerification(
       ctx.organisationId,
@@ -41,7 +43,7 @@ export class ComplianceController {
   @RequireScopes(SCOPES.COMPLIANCE_WRITE)
   screen(
     @CurrentOrg() ctx: RequestContext,
-    @Body() body: { subjectType: string; subjectId: string; screeningType: string },
+    @Body() body: ScreeningDto,
   ) {
     return this.compliance.screen(
       ctx.organisationId,
@@ -53,10 +55,10 @@ export class ComplianceController {
 
   @Post('limits')
   @RequireScopes(SCOPES.COMPLIANCE_WRITE)
+  @RequireMfa()
   setLimit(
     @CurrentOrg() ctx: RequestContext,
-    @Body()
-    body: { name: string; assetCode?: string; dailyLimit?: string; perTxLimit?: string },
+    @Body() body: SetLimitDto,
   ) {
     return this.compliance.setLimit(ctx.organisationId, body.name, body);
   }
@@ -71,8 +73,7 @@ export class ComplianceController {
   @RequireScopes(SCOPES.COMPLIANCE_WRITE)
   requestApproval(
     @CurrentOrg() ctx: RequestContext,
-    @Body()
-    body: { resourceType: string; resourceId: string; amount?: string; assetCode?: string },
+    @Body() body: RequestApprovalDto,
   ) {
     return this.compliance.requestApproval(
       ctx.organisationId,
@@ -80,17 +81,19 @@ export class ComplianceController {
       body.resourceId,
       body.amount,
       body.assetCode,
+      ctx.apiKeyId,
     );
   }
 
   @Post('approvals/:id/decide')
   @RequireScopes(SCOPES.COMPLIANCE_WRITE)
+  @RequireMfa()
   decide(
     @CurrentOrg() ctx: RequestContext,
     @Param('id') id: string,
-    @Body() body: { decision: 'approved' | 'rejected'; note?: string },
+    @Body() body: DecideApprovalDto,
   ) {
-    return this.compliance.decideApproval(ctx.organisationId, id, body.decision, body.note);
+    return this.compliance.decideApproval(ctx.organisationId, id, body.decision, body.note, ctx.apiKeyId);
   }
 
   @Get('approvals')

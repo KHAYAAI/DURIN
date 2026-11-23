@@ -1,10 +1,31 @@
 openapi: 3.1.0
 info:
   title: DURIN API
-  version: 0.8.0
+  version: 0.1.0
   description: |
     Institutional digital financial infrastructure (FORGE Layer 3).
-    Sandbox by default. Amounts are decimal strings. Idempotency-Key required on financial POSTs.
+
+    **Status: sandbox only.** All money movement is simulated. Live ZAR/USDC conversion is awaiting
+    regulatory approval and live custody/fiat providers are awaiting credentials. This API is not
+    production-ready.
+
+    **Conventions**
+    - Amounts are exact decimal strings (e.g. `"1000.50"`), never numbers. ZAR allows 2 decimal
+      places; USDC and USDT allow 6.
+    - Authenticate with `Authorization: Bearer dk_test_...`. Keys are scoped; a key can only grant
+      scopes it holds, and only `admin` keys can grant `admin`.
+    - Send `Idempotency-Key` on every mutating request. The same key with the same request replays
+      the original response (header `Idempotent-Replayed: true`); the same key with a different
+      request returns `409 IDEMPOTENCY_KEY_REUSED`; a request still running returns
+      `409 IDEMPOTENCY_IN_PROGRESS`. Keys are scoped per organisation.
+    - Errors are JSON with `statusCode`, `code` and `message`. Money-movement refusals use stable
+      codes such as `NEGATIVE_BALANCE`, `LIMIT_EXCEEDED`, `UNBALANCED_JOURNAL`.
+    - Endpoints marked *sandbox only* return `403 AWAITING_REGULATORY_APPROVAL` in production.
+
+    **Webhooks.** Events are queued durably and delivered at-least-once with exponential backoff
+    (up to 8 attempts). Each request carries `DURIN-Signature: t=<unix>,v1=<hmac>` where the HMAC is
+    SHA-256 over `"<t>.<raw body>"` with the endpoint's signing secret. Verify against the raw body
+    and reject timestamps older than 5 minutes; de-duplicate on the event `id`.
   contact:
     name: DURIN Engineering
 servers:
@@ -291,10 +312,12 @@ paths:
   /compliance/verifications/{id}/simulate_approve:
     post:
       tags: [Compliance]
+      summary: Approve a verification (sandbox only)
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
-        '200': { description: Approved }
+        '201': { description: Approved }
+        '403': { $ref: '#/components/responses/Error' }
   /compliance/screenings:
     post:
       tags: [Compliance]
@@ -321,10 +344,14 @@ paths:
   /compliance/approvals/{id}/decide:
     post:
       tags: [Compliance]
+      summary: Decide an approval request
+      description: Four-eyes. The API key that requested an approval cannot decide it (`403 FOUR_EYES_REQUIRED`). Only one decision can succeed.
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
-        '200': { description: Decided }
+        '201': { description: Decided }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
   /compliance/audit:
     get:
       tags: [Compliance]
@@ -346,7 +373,175 @@ paths:
         - $ref: '#/components/parameters/Id'
       responses:
         '200': { description: Deleted }
+  /webhook_endpoints/{id}/rotate_secret:
+    post:
+      tags: [Webhooks]
+      summary: Rotate the signing secret (returned once)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '201': { description: New secret }
+  /webhook_endpoints/{id}/deliveries:
+    get:
+      tags: [Webhooks]
+      summary: Delivery log (status, attempts, last response) for an endpoint
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: OK }
+  /ledger/integrity:
+    get:
+      tags: [Ledger]
+      summary: Re-derive every balance from posted entries and check every journal balances (admin scope)
+      responses:
+        '200': { description: "`healthy: true` when no drift and no unbalanced journals" }
+  /conversions/{id}/resolve:
+    post:
+      tags: [Conversions]
+      summary: Resolve a conversion whose liquidity-provider outcome is unknown (scope conversions:resolve; MFA for dashboard users)
+      description: Asks the provider for the order's state. Never re-sends the order. `confirmNotExecuted` lets an operator release the reservation only when the provider reports no such order.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { confirmNotExecuted: { type: boolean } } }
+      responses:
+        '201': { description: Conversion (settled, failed, or still unresolved with providerStatus) }
+  /reconciliation/runs:
+    post:
+      tags: [Reconciliation]
+      summary: Compare the ledger's custody-reference accounts with custodian-reported balances (scope reconciliation:write)
+      responses:
+        '201': { description: "Run with `status` clean|breaks, `source` simulated|live, and any breaks" }
+  /reconciliation/runs/latest:
+    get:
+      tags: [Reconciliation]
+      summary: Latest reconciliation run (scope reconciliation:read)
+      responses:
+        '200': { description: Run or null }
+  /reconciliation/breaks:
+    get:
+      tags: [Reconciliation]
+      summary: List breaks, optionally filtered by status=open|acknowledged
+      responses:
+        '200': { description: OK }
+  /reconciliation/breaks/{id}/acknowledge:
+    post:
+      tags: [Reconciliation]
+      summary: Acknowledge a break (never changes a balance; MFA for dashboard users)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '201': { description: Acknowledged }
+        '404': { description: No such open break }
+  /webhooks/didit:
+    post:
+      tags: [Compliance]
+      summary: Didit verification webhook receiver (not API-key authenticated)
+      description: Authenticated by the `X-Signature-V2` HMAC over canonical JSON and a 300 s `X-Timestamp` window. Deduplicated by `event_id`.
+      security: []
+      responses:
+        '200': { description: "`result`: applied, duplicate, unknown or ignored" }
+        '401': { description: Invalid signature or stale timestamp }
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: The calling principal (API key or WorkOS user), its scopes and MFA state
+      responses:
+        '200': { description: OK }
+  /auth/mfa/status:
+    get:
+      tags: [Auth]
+      summary: Whether this user session holds a valid TOTP step-up (WorkOS users only)
+      responses:
+        '200': { description: OK }
+  /auth/mfa/enroll:
+    post:
+      tags: [Auth]
+      summary: Enroll a TOTP authenticator for the signed-in user (secret shown once)
+      responses:
+        '201': { description: Factor id, secret and otpauth URI }
+  /auth/mfa/challenge:
+    post:
+      tags: [Auth]
+      summary: Start a TOTP challenge bound to this session
+      responses:
+        '201': { description: "`challengeId`, `expiresAt`" }
+  /auth/mfa/verify:
+    post:
+      tags: [Auth]
+      summary: Complete a challenge; 5 attempts max, single use
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [challengeId, code], properties: { challengeId: { type: string }, code: { type: string, pattern: '^\\d{6}$' } } }
+      responses:
+        '201': { description: Verified until `expiresAt` }
+        '403': { description: Invalid code or challenge }
+  /auth/sso/portal-link:
+    post:
+      tags: [Auth]
+      summary: One-time WorkOS Admin Portal link to configure SAML/OIDC SSO (admin + MFA)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [intent], properties: { intent: { type: string, enum: [sso, dsync] }, returnUrl: { type: string } } }
+      responses:
+        '201': { description: Link }
+  /auth/workos/organisation:
+    put:
+      tags: [Auth]
+      summary: Link this organisation to its WorkOS organization (admin + MFA)
+      responses:
+        '200': { description: Linked }
+  /chains:
+    get:
+      tags: [Wallets]
+      summary: Chains enabled in this environment, with native token identifiers and confirmation depth
+      responses:
+        '200': { description: OK }
+  /compliance/gates/g1:
+    get:
+      tags: [Compliance]
+      summary: List Gate G1 (counsel sign-off) records
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Compliance]
+      summary: Record a Gate G1 sign-off (signed-in admin user with MFA only; never an API key)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [counselReference, documentSha256, assets, jurisdictions, validDays], properties: { counselReference: { type: string }, documentSha256: { type: string }, assets: { type: array, items: { type: string } }, jurisdictions: { type: array, items: { type: string } }, validDays: { type: integer, minimum: 1, maximum: 365 } } }
+      responses:
+        '201': { description: Recorded }
+        '403': { description: Not a signed-in user, or MFA not completed }
+  /compliance/gates/g1/{id}/revoke:
+    post:
+      tags: [Compliance]
+      summary: Revoke a Gate G1 sign-off (closes the gate immediately)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '201': { description: Revoked }
+  /version:
+    get:
+      tags: [Meta]
+      summary: Version, mode and honest capability statuses
+      security: []
+      responses:
+        '200': { description: OK }
 components:
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
   securitySchemes:
     ApiKeyAuth:
       type: http
@@ -364,6 +559,13 @@ components:
       required: false
       schema: { type: string }
   schemas:
+    Error:
+      type: object
+      required: [statusCode, message]
+      properties:
+        statusCode: { type: integer }
+        code: { type: string, description: Stable machine-readable error code }
+        message: { type: string }
     CreateAccount:
       type: object
       required: [code, name, accountType, assetCode]

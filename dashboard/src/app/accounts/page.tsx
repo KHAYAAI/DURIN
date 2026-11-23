@@ -17,7 +17,7 @@ export default async function Page() {
       <h1>Accounts</h1>
       <p className="sub">Source: {apiBase()}/accounts</p>
       {!isConfigured() && (
-        <div className="note">Set NEXT_PUBLIC_DURIN_API_KEY and NEXT_PUBLIC_DURIN_API_URL to load data.</div>
+        <div className="note">Set DURIN_API_KEY and DURIN_API_URL to load data.</div>
       )}
       {error && <div className="note">Error: {error}</div>}
       {isConfigured() && !error && (

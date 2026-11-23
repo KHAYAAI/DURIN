@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { RequireMfa } from '../auth/mfa.decorator';
 import { ConversionsService } from './conversions.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
 import { CreateConversionDto } from './dto/create-conversion.dto';
@@ -63,6 +64,18 @@ export class ConversionsController {
       ctx.organisationId,
       limit ? parseInt(limit, 10) : 50,
     );
+  }
+
+  /** Resolve a conversion whose liquidity-provider outcome is unknown. Never re-sends the order. */
+  @Post('conversions/:id/resolve')
+  @RequireScopes(SCOPES.CONVERSIONS_RESOLVE)
+  @RequireMfa()
+  resolve(
+    @CurrentOrg() ctx: RequestContext,
+    @Param('id') id: string,
+    @Body() body: { confirmNotExecuted?: boolean },
+  ) {
+    return this.conversions.resolve(ctx.organisationId, id, body?.confirmNotExecuted === true ? 'not_executed' : undefined);
   }
 
   @Get('conversions/:id')

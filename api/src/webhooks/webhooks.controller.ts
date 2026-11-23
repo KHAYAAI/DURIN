@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { WebhooksService } from './webhooks.service';
 import { CreateWebhookDto } from './dto/create-webhook.dto';
 import { ApiKeyGuard } from '../auth/api-key.guard';
@@ -22,6 +22,18 @@ export class WebhooksController {
   @RequireScopes(SCOPES.WEBHOOKS_READ)
   list(@CurrentOrg() ctx: RequestContext) {
     return this.webhooks.list(ctx.organisationId);
+  }
+
+  @Post(':id/rotate_secret')
+  @RequireScopes(SCOPES.WEBHOOKS_WRITE)
+  rotate(@CurrentOrg() ctx: RequestContext, @Param('id') id: string) {
+    return this.webhooks.rotateSecret(ctx.organisationId, id);
+  }
+
+  @Get(':id/deliveries')
+  @RequireScopes(SCOPES.WEBHOOKS_READ)
+  deliveries(@CurrentOrg() ctx: RequestContext, @Param('id') id: string, @Query('limit') limit?: string) {
+    return this.webhooks.deliveries(ctx.organisationId, id, limit ? parseInt(limit, 10) || 50 : 50);
   }
 
   @Delete(':id')

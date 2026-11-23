@@ -1,11 +1,15 @@
-import { IsArray, IsString, IsUrl, ArrayUnique, MinLength } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsString, MaxLength } from 'class-validator';
 
 export class CreateWebhookDto {
-  @IsUrl({ require_tld: false })
+  /** Must be https and resolve to a public address; validated in WebhooksService. */
+  @IsString()
+  @MaxLength(2048)
   url!: string;
 
+  /** Event types, or ["*"] / [] for all. */
   @IsArray()
   @ArrayUnique()
+  @ArrayMaxSize(20)
   @IsString({ each: true })
   events!: string[];
 }

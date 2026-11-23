@@ -9,6 +9,10 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { WebhookDeliveryService } from '../webhooks/webhook-delivery.service';
+import { assertPositiveAmount } from '../common/money';
+import { ensureCustodyRef, ensureCustomer } from '../ledger/chart';
+import { sandboxCustody } from '../providers/sandbox-custody';
+import { assertSandboxOnly } from '../common/sandbox';
 
 const SUPPORTED_ASSETS = new Set(['USDC', 'USDT', 'ZAR']);
 
@@ -35,13 +39,12 @@ export class PaymentsService {
     },
     idempotencyKey?: string,
   ) {
+    assertSandboxOnly('Payment intents');
     const assetCode = data.assetCode.toUpperCase();
     if (!SUPPORTED_ASSETS.has(assetCode)) {
       throw new BadRequestException(`Unsupported asset: ${assetCode}. Sandbox supports USDC, USDT, ZAR.`);
     }
-    if (parseFloat(data.amount) <= 0) {
-      throw new BadRequestException('Amount must be positive');
-    }
+    assertPositiveAmount(data.amount, assetCode);
 
     if (idempotencyKey) {
       const existing = await this.prisma.paymentIntent.findUnique({
@@ -100,6 +103,7 @@ export class PaymentsService {
    * Moves intent → confirmed → posts ledger entries → settled.
    */
   async simulateConfirm(organisationId: string, intentId: string) {
+    assertSandboxOnly('Simulated payment confirmation');
     const intent = await this.prisma.paymentIntent.findFirst({
       where: { id: intentId, organisationId },
     });
@@ -142,6 +146,7 @@ export class PaymentsService {
       },
       `pi-settle-${intent.id}`,
     );
+    sandboxCustody.creditOnce(`pi-settle-${intent.id}`, organisationId, intent.assetCode, amount);
 
     const updated = await this.prisma.paymentIntent.update({
       where: { id: intent.id },
@@ -186,6 +191,7 @@ export class PaymentsService {
       metadata?: Record<string, unknown>;
     },
   ) {
+    if (data.amount) assertPositiveAmount(data.amount, data.assetCode);
     const slug = randomBytes(12).toString('base64url');
     const link = await this.prisma.paymentLink.create({
       data: {
@@ -217,46 +223,10 @@ export class PaymentsService {
     return this.serializeLink(link);
   }
 
-  /** Ensure platform settlement accounts exist for the asset (auto-provision in sandbox). */
+  /** Custody-reference + customer accounts for the asset (see ledger/chart.ts). */
   private async ensureSettlementAccounts(organisationId: string, assetCode: string) {
-    const assetCodeUp = assetCode.toUpperCase();
-    const assetCodeKey = `SETTLEMENT-ASSET-${assetCodeUp}`;
-    const liabCodeKey = `SETTLEMENT-LIAB-${assetCodeUp}`;
-
-    let assetAccount = await this.prisma.ledgerAccount.findUnique({
-      where: {
-        organisationId_code: { organisationId, code: assetCodeKey },
-      },
-    });
-    if (!assetAccount) {
-      const created = await this.ledger.createAccount(organisationId, {
-        code: assetCodeKey,
-        name: `Settlement asset ${assetCodeUp}`,
-        accountType: 'asset',
-        assetCode: assetCodeUp,
-      });
-      assetAccount = await this.prisma.ledgerAccount.findUniqueOrThrow({
-        where: { id: created.id },
-      });
-    }
-
-    let liabilityAccount = await this.prisma.ledgerAccount.findUnique({
-      where: {
-        organisationId_code: { organisationId, code: liabCodeKey },
-      },
-    });
-    if (!liabilityAccount) {
-      const created = await this.ledger.createAccount(organisationId, {
-        code: liabCodeKey,
-        name: `Customer liability ${assetCodeUp}`,
-        accountType: 'liability',
-        assetCode: assetCodeUp,
-      });
-      liabilityAccount = await this.prisma.ledgerAccount.findUniqueOrThrow({
-        where: { id: created.id },
-      });
-    }
-
+    const assetAccount = await ensureCustodyRef(this.ledger, organisationId, assetCode);
+    const liabilityAccount = await ensureCustomer(this.ledger, organisationId, assetCode);
     return { assetAccount, liabilityAccount };
   }
 
