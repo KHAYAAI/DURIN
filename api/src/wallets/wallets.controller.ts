@@ -1,4 +1,5 @@
 import { IsString, Matches } from 'class-validator';
+import { RequireMfa } from '../auth/mfa.decorator';
 import {
   Body,
   Controller,
@@ -75,6 +76,7 @@ export class WalletsController {
 
   @Post('withdrawals')
   @RequireScopes(SCOPES.WALLETS_WRITE)
+  @RequireMfa()
   withdraw(
     @CurrentOrg() ctx: RequestContext,
     @Body() dto: CreateWithdrawalDto,

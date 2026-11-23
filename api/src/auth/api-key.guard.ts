@@ -11,12 +11,17 @@ import { REQUEST_CONTEXT_KEY, RequestContext } from '../common/request-context';
 import { SCOPES_KEY } from './scopes.decorator';
 import { keyPrefixOf, verifyApiKey } from '../common/crypto-keys';
 import { isSandboxMode } from '../common/sandbox';
+import { WorkosAuthService } from './workos-auth.service';
+import { MfaService } from './mfa.service';
+import { REQUIRE_MFA_KEY } from './mfa.decorator';
 
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
   constructor(
     private readonly prisma: PrismaService,
     private readonly reflector: Reflector,
+    private readonly workos: WorkosAuthService,
+    private readonly mfa: MfaService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -28,6 +33,9 @@ export class ApiKeyGuard implements CanActivate {
     }
 
     const rawKey = authHeader.slice('Bearer '.length).trim();
+    if (WorkosAuthService.looksLikeJwt(rawKey) && rawKey.length <= 8192) {
+      return this.authenticateUser(context, request, rawKey);
+    }
     // Environment separation: test keys only work in sandbox mode, live keys only outside it.
     const expectedPrefix = isSandboxMode() ? 'dk_test_' : 'dk_live_';
     if (!rawKey.startsWith(expectedPrefix) || rawKey.length > 128) {
@@ -57,6 +65,7 @@ export class ApiKeyGuard implements CanActivate {
       organisationId: match.organisationId,
       apiKeyId: match.id,
       scopes: match.scopes,
+      authMethod: 'api_key',
     };
     request[REQUEST_CONTEXT_KEY] = ctx;
 
@@ -73,6 +82,36 @@ export class ApiKeyGuard implements CanActivate {
       }
     }
 
+    return true;
+  }
+
+  /** Dashboard user: a WorkOS AuthKit access token mapped to a DURIN organisation. */
+  private async authenticateUser(context: ExecutionContext, request: Record<string, unknown>, token: string): Promise<boolean> {
+    const principal = await this.workos.verify(token);
+    const org = await this.prisma.organisation.findUnique({ where: { workosOrganizationId: principal.workosOrganizationId } });
+    if (!org || org.status !== 'active') throw new ForbiddenException('No active DURIN organisation for this WorkOS organization');
+
+    const ctx: RequestContext = {
+      organisationId: org.id,
+      apiKeyId: `user:${principal.userId}`,
+      scopes: principal.scopes,
+      authMethod: 'workos',
+      userId: principal.userId,
+      sessionId: principal.sessionId,
+    };
+    request[REQUEST_CONTEXT_KEY] = ctx;
+
+    const targets = [context.getHandler(), context.getClass()];
+    const required = this.reflector.getAllAndOverride<string[]>(SCOPES_KEY, targets);
+    if (required?.length && !(ctx.scopes.includes('admin') || required.every((s) => ctx.scopes.includes(s)))) {
+      throw new ForbiddenException('Insufficient scope');
+    }
+    if (this.reflector.getAllAndOverride<boolean>(REQUIRE_MFA_KEY, targets)) {
+      const v = await this.mfa.latestVerification(principal.userId, principal.sessionId);
+      if (!v) {
+        throw new ForbiddenException({ code: 'MFA_REQUIRED', message: 'Complete MFA (POST /v1/auth/mfa/challenge then /verify) before this action.' });
+      }
+    }
     return true;
   }
 }

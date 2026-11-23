@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { add, cmp, mul, parseDecimal, sub } from '@durin/ledger';
+import { add, cmp, mul, sub } from '@durin/ledger';
 import { computeQuote, getSandboxRate } from './fx.sandbox';
 import { fillLines, releaseLines, reserveLines, settleLines } from './journal-lines';
 

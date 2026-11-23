@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { RequireMfa } from '../auth/mfa.decorator';
 import { ComplianceService } from './compliance.service';
 import { ApiKeyGuard } from '../auth/api-key.guard';
 import { CurrentOrg } from '../auth/current-org.decorator';
@@ -54,6 +55,7 @@ export class ComplianceController {
 
   @Post('limits')
   @RequireScopes(SCOPES.COMPLIANCE_WRITE)
+  @RequireMfa()
   setLimit(
     @CurrentOrg() ctx: RequestContext,
     @Body() body: SetLimitDto,
@@ -85,6 +87,7 @@ export class ComplianceController {
 
   @Post('approvals/:id/decide')
   @RequireScopes(SCOPES.COMPLIANCE_WRITE)
+  @RequireMfa()
   decide(
     @CurrentOrg() ctx: RequestContext,
     @Param('id') id: string,

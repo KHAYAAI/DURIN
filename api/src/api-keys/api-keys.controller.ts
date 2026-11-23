@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { RequireMfa } from '../auth/mfa.decorator';
 import { ApiKeysService } from './api-keys.service';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { ApiKeyGuard } from '../auth/api-key.guard';
@@ -14,6 +15,7 @@ export class ApiKeysController {
 
   @Post()
   @RequireScopes(SCOPES.API_KEYS_WRITE)
+  @RequireMfa()
   create(@CurrentOrg() ctx: RequestContext, @Body() dto: CreateApiKeyDto) {
     return this.apiKeys.create(ctx.organisationId, dto.name, dto.scopes, ctx.scopes);
   }
@@ -26,6 +28,7 @@ export class ApiKeysController {
 
   @Delete(':id')
   @RequireScopes(SCOPES.API_KEYS_WRITE)
+  @RequireMfa()
   revoke(@CurrentOrg() ctx: RequestContext, @Param('id') id: string) {
     return this.apiKeys.revoke(ctx.organisationId, id);
   }

@@ -1,13 +1,20 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { add, cmp, parseDecimal } from '@durin/ledger';
 import { assertPositiveAmount } from '../common/money';
 import { assertSandboxOnly } from '../common/sandbox';
+import { DiditClient, loadDiditConfig, mapDiditStatus } from './didit';
+import { Inject, Optional } from '@nestjs/common';
+
+export const DIDIT_FETCH = Symbol('DIDIT_FETCH');
 
 @Injectable()
 export class ComplianceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() @Inject(DIDIT_FETCH) private readonly diditFetch?: typeof fetch,
+  ) {}
 
   async startVerification(
     organisationId: string,
@@ -15,19 +22,83 @@ export class ComplianceService {
     subjectId: string,
     level = 'kyb_basic',
   ) {
+    const cfg = loadDiditConfig();
+    if (!cfg.enabled) {
+      const record = await this.prisma.verificationRecord.create({
+        data: {
+          organisationId, subjectType, subjectId, provider: 'sandbox', status: 'pending', level,
+          metadata: { mode: 'sandbox', note: 'Simulated KYB/KYC — no real provider called' },
+        },
+      });
+      await this.audit(organisationId, 'system', null, 'verification.started', 'verification', record.id);
+      return this.serVerification(record);
+    }
+
+    const workflowId = level.startsWith('kyb') ? cfg.kybWorkflow : cfg.kycWorkflow;
+    if (!cfg.apiKey || !workflowId) {
+      throw new ServiceUnavailableException({ code: 'PROVIDER_NOT_CONFIGURED', message: 'Didit is selected but DIDIT_API_KEY / workflow id is not configured.' });
+    }
+    // The record id is the vendor_data we send, so webhooks can always be tied back to it.
     const record = await this.prisma.verificationRecord.create({
+      data: { organisationId, subjectType, subjectId, provider: 'didit', status: 'not_started', level, metadata: { mode: 'live' } },
+    });
+    try {
+      const client = new DiditClient({ apiKey: cfg.apiKey, baseUrl: cfg.baseUrl }, this.diditFetch);
+      const session = await client.createSession({
+        workflowId, vendorData: record.id, callback: cfg.callback,
+        metadata: { organisationId, subjectType },
+      });
+      const updated = await this.prisma.verificationRecord.update({
+        where: { id: record.id },
+        data: { externalId: session.sessionId, verificationUrl: session.url, providerStatus: session.status, status: 'pending' },
+      });
+      await this.audit(organisationId, 'system', null, 'verification.started', 'verification', record.id);
+      return this.serVerification(updated);
+    } catch {
+      await this.prisma.verificationRecord.update({ where: { id: record.id }, data: { status: 'rejected', providerStatus: 'provider_error' } });
+      throw new ServiceUnavailableException({ code: 'PROVIDER_ERROR', message: 'Could not start verification with the provider.' });
+    }
+  }
+
+  /**
+   * Applies a verified Didit webhook. Returns 'duplicate' for an event_id already processed and
+   * 'unknown' when no record matches (acknowledged so Didit does not retry forever).
+   */
+  async applyDiditEvent(body: Record<string, unknown>): Promise<'applied' | 'duplicate' | 'unknown' | 'ignored'> {
+    const eventId = typeof body.event_id === 'string' ? body.event_id : undefined;
+    const sessionId = typeof body.session_id === 'string' ? body.session_id : undefined;
+    const status = typeof body.status === 'string' ? body.status : undefined;
+    if (!eventId || !sessionId || !status || body.webhook_type !== 'status.updated') return 'ignored';
+
+    const vendor = typeof body.vendor_data === 'string' && /^[0-9a-f-]{36}$/i.test(body.vendor_data) ? body.vendor_data : undefined;
+    const rec = await this.prisma.verificationRecord.findFirst({
+      where: { provider: 'didit', OR: [{ externalId: sessionId }, ...(vendor ? [{ id: vendor }] : [])] },
+    });
+    if (!rec) return 'unknown';
+
+    try {
+      await this.prisma.processedWebhookEvent.create({ data: { provider: 'didit', eventId } });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return 'duplicate';
+      throw e;
+    }
+
+    const mapped = mapDiditStatus(status);
+    // Never let a late, out-of-order event downgrade a final decision.
+    const final = rec.status === 'approved' || rec.status === 'rejected';
+    const next = final && (mapped === 'pending' || mapped === 'not_started') ? rec.status : mapped;
+    const updated = await this.prisma.verificationRecord.update({
+      where: { id: rec.id },
       data: {
-        organisationId,
-        subjectType,
-        subjectId,
-        provider: 'sandbox',
-        status: 'pending',
-        level,
-        metadata: { mode: 'sandbox', note: 'Simulated KYB/KYC — no real provider called' },
+        status: next,
+        providerStatus: status,
+        externalId: rec.externalId ?? sessionId,
+        lastEventId: eventId,
+        reviewedAt: next === 'approved' || next === 'rejected' ? new Date() : rec.reviewedAt,
       },
     });
-    await this.audit(organisationId, 'system', null, 'verification.started', 'verification', record.id);
-    return this.serVerification(record);
+    await this.audit(rec.organisationId, 'system', 'didit', 'verification.updated', 'verification', rec.id, { status: next, providerStatus: status });
+    return updated ? 'applied' : 'applied';
   }
 
   /** Live gate: the organisation must hold an approved KYB from a real provider (never the sandbox). */
@@ -49,6 +120,7 @@ export class ComplianceService {
       where: { id, organisationId },
     });
     if (!rec) throw new NotFoundException('Verification not found');
+    if (rec.provider !== 'sandbox') throw new ForbiddenException('Provider-backed verifications can only be decided by the provider');
     const updated = await this.prisma.verificationRecord.update({
       where: { id },
       data: { status: 'approved', reviewedAt: new Date() },
@@ -301,6 +373,8 @@ export class ComplianceService {
     level: string;
     reviewedAt: Date | null;
     createdAt: Date;
+    verificationUrl?: string | null;
+    providerStatus?: string | null;
   }) {
     return {
       id: r.id,
@@ -311,7 +385,9 @@ export class ComplianceService {
       level: r.level,
       reviewedAt: r.reviewedAt,
       createdAt: r.createdAt,
-      mode: 'sandbox' as const,
+      verificationUrl: r.provider === 'didit' && r.status !== 'approved' ? (r.verificationUrl ?? null) : null,
+      providerStatus: r.providerStatus ?? null,
+      mode: r.provider === 'sandbox' ? ('sandbox' as const) : ('live' as const),
     };
   }
 

@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { RequireMfa } from '../auth/mfa.decorator';
 import { ReconciliationService } from './reconciliation.service';
 import { ApiKeyGuard } from '../auth/api-key.guard';
 import { CurrentOrg } from '../auth/current-org.decorator';
@@ -31,6 +32,7 @@ export class ReconciliationController {
 
   @Post('breaks/:id/acknowledge')
   @RequireScopes(SCOPES.RECONCILIATION_WRITE)
+  @RequireMfa()
   acknowledge(@CurrentOrg() ctx: RequestContext, @Param('id') id: string, @Body() body: { note?: string }) {
     return this.reconciliation.acknowledge(ctx.organisationId, id, ctx.apiKeyId ?? 'unknown', body?.note);
   }
