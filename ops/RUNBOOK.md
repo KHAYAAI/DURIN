@@ -30,6 +30,9 @@ A liquidity/custody call timed out or errored; funds are **reserved** and the or
 4. `insolvent` — custody + LP clearing < customer balances + in-transit: **stop withdrawals and conversions** for the asset (see Kill switches) until explained. Escalate to the MLRO/finance lead.
 5. Acknowledge only after a correcting entry or documented explanation; acknowledgement changes no balance.
 
+### Deposit watcher
+Customers are credited only when the watcher sees a **finalized** token-balance increase on their address. If `durin_deposit_watcher_age_seconds` alerts: check `SOLANA_RPC_URL`/key (provider outage or rate limit), the API logs for `Deposit scan failed`, and that `DEPOSIT_WATCHER_INTERVAL_SECONDS` is set. The cursor never skips a transaction, so after recovery the watcher catches up automatically. Rejected deposits (wrong or bridged mint) appear in the audit log as `deposit.rejected` — they are not credited; funds sit at the custodian and need a manual, counsel-approved return process (not built).
+
 ### Stuck withdrawal
 Withdrawal `requested`/`processing` > 10 min. The ledger debit is already posted. Query the custodian by `clientReference` (= withdrawal id); if confirmed, update status; if the custodian rejects, the reversal journal posts automatically; if unknown, treat as *unknown outcome* above.
 

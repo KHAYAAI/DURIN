@@ -2,6 +2,7 @@ import { Controller, Get, Header, Headers, UnauthorizedException } from '@nestjs
 import { timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { renderHttpMetrics } from './http-metrics';
+import { watcherStatus } from '../chains/deposit-watcher.service';
 
 type Row = Record<string, bigint | number | Date | null>;
 const n = (v: unknown) => Number(v ?? 0);
@@ -49,6 +50,7 @@ export class MetricsController {
       g('durin_webhook_backlog', 'Webhook deliveries overdue by > 5m', r?.webhook_backlog),
       g('durin_webhook_failed', 'Webhook deliveries that exhausted retries', r?.webhook_failed),
       g('durin_withdrawals_stuck', 'Withdrawals requested/processing for > 10m', r?.stuck_withdrawals),
+      g('durin_deposit_watcher_age_seconds', 'Seconds since the Solana deposit watcher last completed an error-free pass (-1 = never)', watcherStatus.lastSuccessAt ? Math.floor((Date.now() - watcherStatus.lastSuccessAt) / 1000) : -1),
       g('durin_verifications_stale', 'KYC/KYB verifications pending > 7d', r?.stale_verifications),
       '',
     ].join('\n');
