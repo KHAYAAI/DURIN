@@ -23,6 +23,7 @@
 5. **Stablecoin specifics.** Any restriction on USDC vs USDT, or on specific chains (Tron)? Issuer freeze risk and sanctions exposure for USDT?
 6. **Customer eligibility.** Acceptable jurisdictions and entity types; what KYB depth (UBO threshold, registry + documents + screening) is required; ongoing monitoring cadence.
 7. **Reporting.** FinSurv, FIC (STR/CTR), SARS CARF — what DURIN must produce, in what form, and by when.
+9. **Internal netting and principal exposure.** DURIN intends to match opposing customer conversions internally and send only the net difference to the liquidity provider (see `NETTING_DESIGN.md`). Does matching customers' orders, or carrying a short-lived unhedged position between delivery and hedge, make DURIN a principal/dealer or otherwise change its licensing, capital or reporting duties? Is an atomic-matching-only variant (no unhedged position) treated differently? Later, if DURIN holds a small own inventory to quote from, what additional authorisation and capital are required?
 8. **Gate G1 scope and wording.** Which assets and jurisdictions the sign-off covers, its validity period (the system caps it at 365 days and requires an expiry), conditions that must trigger revocation, and who may record it.
 
 ## What engineering will record if counsel signs
