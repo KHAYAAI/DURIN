@@ -17,7 +17,6 @@ primary_region = "fra"
   DIDIT_WORKFLOW_KYB = "65a5d74a-6905-4590-971a-e9bd65641b4e"
   DIDIT_WORKFLOW_KYC = "be3877e5-9b0d-4fa2-9d68-123c25160f2a"
   WORKOS_CLIENT_ID = "client_01M079SBRGBJ82933Y70J1KDX2"
-  RECONCILIATION_INTERVAL_SECONDS = "300"
 
 [deploy]
   # Applies migrations as the schema owner (MIGRATION_DATABASE_URL) before new machines take traffic.
