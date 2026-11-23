@@ -16,9 +16,15 @@ import { ComplianceService } from '../compliance/compliance.service';
 import { WebhookDeliveryService } from '../webhooks/webhook-delivery.service';
 import { assertPositiveAmount } from '../common/money';
 import { ensureCustodyRef, ensureCustomer } from '../ledger/chart';
+import { assertChainAllowed, assertValidDestination, evaluateDeposit } from '../chains/chain-policy';
+import { isSandboxMode } from '../common/sandbox';
 import { sandboxCustody } from '../providers/sandbox-custody';
 import { assertSandboxOnly } from '../common/sandbox';
 import { parseDecimal } from '@durin/ledger';
+
+function defaultChain(): string | undefined {
+  return isSandboxMode() ? 'ethereum-sepolia' : undefined;
+}
 
 @Injectable()
 export class WalletsService {
@@ -79,10 +85,11 @@ export class WalletsService {
       throw new BadRequestException('Wallet missing provider reference');
     }
 
+    const entry = assertChainAllowed(assetCode, chain ?? defaultChain());
     const remote = await this.layer1.createDepositAddress({
       walletExternalRef: wallet.externalRef,
       assetCode: assetCode.toUpperCase(),
-      chain,
+      chain: entry.chain,
     });
 
     const address = await this.prisma.depositAddress.create({
@@ -114,7 +121,8 @@ export class WalletsService {
   }
 
   /**
-   * Sandbox: simulate detecting a deposit to an address and credit ledger liability.
+   * Sandbox: simulate detecting a fully confirmed, native-token deposit and credit the customer.
+   * Goes through the same chain policy and crediting path as a real detection.
    */
   async simulateDeposit(
     organisationId: string,
@@ -130,40 +138,18 @@ export class WalletsService {
     assertPositiveAmount(amount, addr.assetCode);
 
     const detection = this.layer1.simulateDeposit
-      ? await this.layer1.simulateDeposit({
-          address: addr.address,
-          assetCode: addr.assetCode,
-          amount,
-        })
+      ? await this.layer1.simulateDeposit({ address: addr.address, assetCode: addr.assetCode, amount })
       : { detected: true, txHash: '0xsimulated' };
 
-    // Credit platform settlement accounts (same pattern as payment settle)
-    const assetAcc = await ensureCustodyRef(this.ledger, organisationId, addr.assetCode);
-    const liabAcc = await ensureCustomer(this.ledger, organisationId, addr.assetCode);
-
-    const journal = await this.ledger.postJournal(
-      organisationId,
-      {
-        reference: `deposit:${addr.id}:${detection.txHash}`,
-        description: `Simulated deposit to ${addr.address}`,
-        lines: [
-          {
-            accountId: assetAcc.id,
-            direction: 'debit',
-            amount,
-            assetCode: addr.assetCode,
-          },
-          {
-            accountId: liabAcc.id,
-            direction: 'credit',
-            amount,
-            assetCode: addr.assetCode,
-          },
-        ],
-      },
-      `dep-${addr.id}-${detection.txHash}`,
-    );
-    sandboxCustody.creditOnce(`dep-${addr.id}-${detection.txHash}`, organisationId, addr.assetCode, amount);
+    const entry = assertChainAllowed(addr.assetCode, addr.chain);
+    const result = await this.recordDetectedDeposit(organisationId, addr.id, {
+      txHash: detection.txHash,
+      amount,
+      tokenContract: entry.token,
+      confirmations: entry.confirmations,
+    });
+    if (result.status !== 'credited') throw new BadRequestException({ code: 'DEPOSIT_NOT_CREDITED', message: result.status });
+    const journal = result.journal;
 
     return {
       detected: detection.detected,
@@ -210,6 +196,9 @@ export class WalletsService {
       if (existing) return this.replayWithdrawal(existing, data, assetCode);
     }
 
+    const chainEntry = assertChainAllowed(assetCode, data.chain ?? defaultChain());
+    assertValidDestination(chainEntry, data.destination);
+
     const wallet = await this.prisma.wallet.findFirst({
       where: { id: data.walletId, organisationId },
     });
@@ -240,7 +229,7 @@ export class WalletsService {
           assetCode,
           amount: new Prisma.Decimal(amount),
           destination: data.destination,
-          chain: data.chain ?? 'ethereum-sepolia',
+          chain: chainEntry.chain,
           status: 'requested',
           idempotencyKey,
         },
@@ -294,7 +283,7 @@ export class WalletsService {
         assetCode,
         amount,
         destination: data.destination,
-        chain: data.chain,
+        chain: chainEntry.chain,
         clientReference: row.id,
       });
     } catch (e) {
@@ -385,6 +374,59 @@ export class WalletsService {
     });
     if (!row) throw new NotFoundException('Withdrawal not found');
     return this.serializeWithdrawal(row);
+  }
+
+  /**
+   * Entry point for a custody adapter (or webhook handler) that has seen funds arrive on a deposit
+   * address. Applies the chain policy (native token only, enabled chain, confirmation depth) and
+   * credits the customer exactly once per (address, txHash). Callers re-invoke as confirmations grow.
+   */
+  async recordDetectedDeposit(
+    organisationId: string,
+    addressId: string,
+    d: { txHash: string; amount: string; tokenContract: string; tokenSymbol?: string; confirmations: number },
+  ): Promise<
+    | { status: 'credited'; journal: Awaited<ReturnType<LedgerService['postJournal']>> }
+    | { status: 'pending'; have: number; need: number }
+    | { status: 'rejected'; reason: string }
+  > {
+    if (!/^[0-9a-f-]{36}$/i.test(addressId)) throw new NotFoundException('Deposit address not found');
+    const addr = await this.prisma.depositAddress.findFirst({ where: { id: addressId, organisationId } });
+    if (!addr) throw new NotFoundException('Deposit address not found');
+    assertPositiveAmount(d.amount, addr.assetCode);
+
+    const verdict = evaluateDeposit({
+      assetCode: addr.assetCode, chain: addr.chain, tokenContract: d.tokenContract,
+      tokenSymbol: d.tokenSymbol, confirmations: d.confirmations,
+    });
+    if (verdict.action === 'wait') return { status: 'pending', have: verdict.have, need: verdict.need };
+    if (verdict.action === 'reject') {
+      await this.prisma.auditLog.create({
+        data: {
+          organisationId, actorType: 'system', action: 'deposit.rejected', resourceType: 'deposit_address', resourceId: addr.id,
+          metadata: { reason: verdict.reason, txHash: d.txHash, tokenContract: d.tokenContract, amount: d.amount },
+        },
+      });
+      return { status: 'rejected', reason: verdict.reason };
+    }
+
+    const assetAcc = await ensureCustodyRef(this.ledger, organisationId, addr.assetCode);
+    const liabAcc = await ensureCustomer(this.ledger, organisationId, addr.assetCode);
+    const key = `dep-${addr.id}-${d.txHash}`;
+    const journal = await this.ledger.postJournal(
+      organisationId,
+      {
+        reference: `deposit:${addr.id}:${d.txHash}`,
+        description: `Deposit to ${addr.address} (${addr.chain})`,
+        lines: [
+          { accountId: assetAcc.id, direction: 'debit', amount: d.amount, assetCode: addr.assetCode },
+          { accountId: liabAcc.id, direction: 'credit', amount: d.amount, assetCode: addr.assetCode },
+        ],
+      },
+      key,
+    );
+    if (isSandboxMode()) sandboxCustody.creditOnce(key, organisationId, addr.assetCode, d.amount);
+    return { status: 'credited', journal };
   }
 
   private serializeWallet(

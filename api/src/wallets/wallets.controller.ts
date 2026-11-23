@@ -1,4 +1,5 @@
 import { IsString, Matches } from 'class-validator';
+import { listEnabledChains } from '../chains/chain-policy';
 import { RequireMfa } from '../auth/mfa.decorator';
 import {
   Body,
@@ -62,6 +63,16 @@ export class WalletsController {
       dto.assetCode,
       dto.chain,
     );
+  }
+
+  /** Chains enabled in this environment, with native token identifiers and confirmation depth. */
+  @Get('chains')
+  @RequireScopes(SCOPES.WALLETS_READ)
+  chains() {
+    return listEnabledChains().map((c) => ({
+      assetCode: c.assetCode, chain: c.chain, network: c.network, tokenContract: c.token,
+      decimals: c.decimals, confirmations: c.confirmations,
+    }));
   }
 
   @Post('deposit_addresses/:id/simulate_deposit')
