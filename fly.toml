@@ -1,0 +1,42 @@
+# DURIN API — Fly.io STAGING.  Deploy from the repository root:  fly deploy --remote-only
+# App names are global on Fly: change `app` if durin-staging-api is taken.
+app = "durin-staging-api"
+primary_region = "fra"
+
+[build]
+  dockerfile = "docker/Dockerfile.api"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  TRUST_PROXY = "1"
+  # STAGING ONLY: lets the production safety check accept the simulated providers. Never set in production.
+  ALLOW_SANDBOX_IN_PRODUCTION = "true"
+  VERIFICATION_PROVIDER = "didit"
+  DIDIT_BASE_URL = "https://verification.didit.me"
+  DIDIT_WORKFLOW_KYB = "65a5d74a-6905-4590-971a-e9bd65641b4e"
+  DIDIT_WORKFLOW_KYC = "be3877e5-9b0d-4fa2-9d68-123c25160f2a"
+  WORKOS_CLIENT_ID = "client_01M079SBRGBJ82933Y70J1KDX2"
+
+[deploy]
+  # Applies migrations as the schema owner (MIGRATION_DATABASE_URL) before new machines take traffic.
+  release_command = "node scripts/migrate.mjs"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # The webhook worker and reconciliation run in-process, so keep one machine running.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
