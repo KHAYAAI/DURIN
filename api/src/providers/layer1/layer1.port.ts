@@ -27,6 +27,8 @@ export interface WithdrawalParams {
   amount: string;
   destination: string;
   chain?: string;
+  /** Caller-chosen id so a provider can de-duplicate retries of the same request. */
+  clientReference?: string;
 }
 
 export interface WithdrawalResult {

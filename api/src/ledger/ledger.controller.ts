@@ -7,6 +7,7 @@ import { CurrentOrg } from '../auth/current-org.decorator';
 import { RequireScopes } from '../auth/scopes.decorator';
 import { RequestContext } from '../common/request-context';
 import { SCOPES } from '../common/scopes';
+import { assertSandboxOnly } from '../common/sandbox';
 
 @Controller()
 @UseGuards(ApiKeyGuard)
@@ -44,6 +45,9 @@ export class LedgerController {
     @Body() dto: PostJournalDto,
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
+    // Clients must never write to the ledger directly: that would mint balances with no backing.
+    // Real money movement happens only through payments, conversions and withdrawals.
+    assertSandboxOnly('Manual journal posting');
     return this.ledger.postJournal(ctx.organisationId, dto, idempotencyKey);
   }
 
@@ -51,6 +55,12 @@ export class LedgerController {
   @RequireScopes(SCOPES.ORGANISATIONS_READ)
   listJournals(@CurrentOrg() ctx: RequestContext, @Query('limit') limit?: string) {
     return this.ledger.listJournals(ctx.organisationId, limit ? parseInt(limit, 10) : 50);
+  }
+
+  @Get('ledger/integrity')
+  @RequireScopes(SCOPES.ADMIN)
+  integrity(@CurrentOrg() ctx: RequestContext) {
+    return this.ledger.integrityReport(ctx.organisationId);
   }
 
   @Get('journals/:id')

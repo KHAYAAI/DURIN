@@ -1,20 +1,32 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { LAYER1_PORT } from '../providers/layer1/layer1.module';
 import { Layer1Port } from '../providers/layer1/layer1.port';
+import { ComplianceService } from '../compliance/compliance.service';
+import { WebhookDeliveryService } from '../webhooks/webhook-delivery.service';
+import { assertPositiveAmount } from '../common/money';
+import { assertSandboxOnly } from '../common/sandbox';
+import { parseDecimal } from '@durin/ledger';
 
 @Injectable()
 export class WalletsService {
+  private readonly log = new Logger(WalletsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly ledger: LedgerService,
+    private readonly compliance: ComplianceService,
+    private readonly webhooks: WebhookDeliveryService,
     @Inject(LAYER1_PORT) private readonly layer1: Layer1Port,
   ) {}
 
@@ -107,11 +119,13 @@ export class WalletsService {
     addressId: string,
     amount: string,
   ) {
+    assertSandboxOnly('Simulated deposits');
     const addr = await this.prisma.depositAddress.findFirst({
       where: { id: addressId, organisationId },
       include: { wallet: true },
     });
     if (!addr) throw new NotFoundException('Deposit address not found');
+    assertPositiveAmount(amount, addr.assetCode);
 
     const detection = this.layer1.simulateDeposit
       ? await this.layer1.simulateDeposit({
@@ -122,33 +136,18 @@ export class WalletsService {
       : { detected: true, txHash: '0xsimulated' };
 
     // Credit platform settlement accounts (same pattern as payment settle)
-    const assetKey = `SETTLEMENT-ASSET-${addr.assetCode}`;
-    const liabKey = `SETTLEMENT-LIAB-${addr.assetCode}`;
-    const assetAcc =
-      (await this.prisma.ledgerAccount.findUnique({
-        where: { organisationId_code: { organisationId, code: assetKey } },
-      })) ??
-      (await this.ledger
-        .createAccount(organisationId, {
-          code: assetKey,
-          name: `Settlement asset ${addr.assetCode}`,
-          accountType: 'asset',
-          assetCode: addr.assetCode,
-        })
-        .then((a) => this.prisma.ledgerAccount.findUniqueOrThrow({ where: { id: a.id } })));
-
-    const liabAcc =
-      (await this.prisma.ledgerAccount.findUnique({
-        where: { organisationId_code: { organisationId, code: liabKey } },
-      })) ??
-      (await this.ledger
-        .createAccount(organisationId, {
-          code: liabKey,
-          name: `Customer liability ${addr.assetCode}`,
-          accountType: 'liability',
-          assetCode: addr.assetCode,
-        })
-        .then((a) => this.prisma.ledgerAccount.findUniqueOrThrow({ where: { id: a.id } })));
+    const assetAcc = await this.ledger.ensureAccount(organisationId, {
+      code: `SETTLEMENT-ASSET-${addr.assetCode}`,
+      name: `Settlement asset ${addr.assetCode}`,
+      accountType: 'asset',
+      assetCode: addr.assetCode,
+    });
+    const liabAcc = await this.ledger.ensureAccount(organisationId, {
+      code: `SETTLEMENT-LIAB-${addr.assetCode}`,
+      name: `Customer liability ${addr.assetCode}`,
+      accountType: 'liability',
+      assetCode: addr.assetCode,
+    });
 
     const journal = await this.ledger.postJournal(
       organisationId,
@@ -185,6 +184,17 @@ export class WalletsService {
     };
   }
 
+  /**
+   * Withdrawal lifecycle (funds-safety rules):
+   *  1. Persist the request (status `requested`) before any money moves.
+   *  2. Debit the customer's ledger balance in one atomic journal keyed on the withdrawal id,
+   *     so a retry can never debit twice.
+   *  3. Call the custody provider.
+   *     - Provider says "failed": post a compensating journal and mark `failed`.
+   *     - Provider call throws / times out: the outcome is UNKNOWN. Funds stay held and the
+   *       request stays `processing` for manual reconciliation. It is never retried or reversed
+   *       automatically, because the provider may have executed it.
+   */
   async requestWithdrawal(
     organisationId: string,
     data: {
@@ -196,13 +206,15 @@ export class WalletsService {
     },
     idempotencyKey?: string,
   ) {
+    const assetCode = data.assetCode.toUpperCase();
+    assertPositiveAmount(data.amount, assetCode);
+    const amount = data.amount;
+
     if (idempotencyKey) {
       const existing = await this.prisma.withdrawalRequest.findUnique({
-        where: {
-          organisationId_idempotencyKey: { organisationId, idempotencyKey },
-        },
+        where: { organisationId_idempotencyKey: { organisationId, idempotencyKey } },
       });
-      if (existing) return this.serializeWithdrawal(existing);
+      if (existing) return this.replayWithdrawal(existing, data, assetCode);
     }
 
     const wallet = await this.prisma.wallet.findFirst({
@@ -210,86 +222,158 @@ export class WalletsService {
     });
     if (!wallet?.externalRef) throw new NotFoundException('Wallet not found');
 
-    const assetCode = data.assetCode.toUpperCase();
-
-    // Debit customer liability / credit settlement asset on ledger first
-    const assetKey = `SETTLEMENT-ASSET-${assetCode}`;
-    const liabKey = `SETTLEMENT-LIAB-${assetCode}`;
-    const assetAcc = await this.prisma.ledgerAccount.findUnique({
-      where: { organisationId_code: { organisationId, code: assetKey } },
-    });
-    const liabAcc = await this.prisma.ledgerAccount.findUnique({
-      where: { organisationId_code: { organisationId, code: liabKey } },
-    });
-    if (!assetAcc || !liabAcc) {
-      throw new BadRequestException(
-        'No settlement accounts for asset — deposit or payment settle first',
-      );
+    const limit = await this.compliance.checkLimits(organisationId, assetCode, amount);
+    if (!limit.allowed) {
+      throw new UnprocessableEntityException({ code: 'LIMIT_EXCEEDED', message: limit.reason });
     }
 
-    let journalId: string | null = null;
+    const assetAcc = await this.prisma.ledgerAccount.findUnique({
+      where: { organisationId_code: { organisationId, code: `SETTLEMENT-ASSET-${assetCode}` } },
+    });
+    const liabAcc = await this.prisma.ledgerAccount.findUnique({
+      where: { organisationId_code: { organisationId, code: `SETTLEMENT-LIAB-${assetCode}` } },
+    });
+    if (!assetAcc || !liabAcc) {
+      throw new BadRequestException('No settlement accounts for asset — deposit or payment settle first');
+    }
+
+    // 1. Persist intent first.
+    let row;
+    try {
+      row = await this.prisma.withdrawalRequest.create({
+        data: {
+          organisationId,
+          walletId: wallet.id,
+          assetCode,
+          amount: new Prisma.Decimal(amount),
+          destination: data.destination,
+          chain: data.chain ?? 'ethereum-sepolia',
+          status: 'requested',
+          idempotencyKey,
+        },
+      });
+    } catch (e) {
+      if (idempotencyKey && e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        const winner = await this.prisma.withdrawalRequest.findUniqueOrThrow({
+          where: { organisationId_idempotencyKey: { organisationId, idempotencyKey } },
+        });
+        return this.replayWithdrawal(winner, data, assetCode);
+      }
+      throw e;
+    }
+
+    const lines = (reverse: boolean) => [
+      { accountId: liabAcc.id, direction: reverse ? ('credit' as const) : ('debit' as const), amount, assetCode },
+      { accountId: assetAcc.id, direction: reverse ? ('debit' as const) : ('credit' as const), amount, assetCode },
+    ];
+
+    // 2. Debit the customer's balance (idempotent on the withdrawal id).
+    let journalId: string;
     try {
       const journal = await this.ledger.postJournal(
         organisationId,
         {
-          reference: `withdrawal:${data.walletId}`,
-          description: `Withdrawal ${data.amount} ${assetCode} to ${data.destination}`,
-          lines: [
-            {
-              accountId: liabAcc.id,
-              direction: 'debit',
-              amount: data.amount,
-              assetCode,
-            },
-            {
-              accountId: assetAcc.id,
-              direction: 'credit',
-              amount: data.amount,
-              assetCode,
-            },
-          ],
+          reference: `withdrawal:${row.id}`,
+          description: `Withdrawal ${amount} ${assetCode} to ${data.destination}`,
+          lines: lines(false),
         },
-        idempotencyKey ? `wd-j-${idempotencyKey}` : undefined,
+        `wd-j-${row.id}`,
       );
       journalId = journal.id;
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Ledger post failed';
-      throw new BadRequestException(msg);
+    } catch (e) {
+      await this.prisma.withdrawalRequest.update({
+        where: { id: row.id },
+        data: { status: 'failed', failureReason: this.safeReason(e) },
+      });
+      throw e;
+    }
+    row = await this.prisma.withdrawalRequest.update({
+      where: { id: row.id },
+      data: { status: 'processing', journalId },
+    });
+
+    // 3. Provider call.
+    let remote;
+    try {
+      remote = await this.layer1.requestWithdrawal({
+        walletExternalRef: wallet.externalRef,
+        assetCode,
+        amount,
+        destination: data.destination,
+        chain: data.chain,
+        clientReference: row.id,
+      });
+    } catch (e) {
+      this.log.error(`Withdrawal ${row.id}: provider outcome unknown: ${e instanceof Error ? e.message : e}`);
+      row = await this.prisma.withdrawalRequest.update({
+        where: { id: row.id },
+        data: { failureReason: 'Provider outcome unknown; funds held pending manual reconciliation' },
+      });
+      await this.webhooks.publish(organisationId, 'withdrawal.processing', this.serializeWithdrawal(row));
+      return {
+        ...this.serializeWithdrawal(row),
+        mode: this.layer1.mode,
+        note: 'The custody provider did not confirm this request. Funds remain held. Do not retry; contact support to reconcile.',
+      };
     }
 
-    const remote = await this.layer1.requestWithdrawal({
-      walletExternalRef: wallet.externalRef,
-      assetCode,
-      amount: data.amount,
-      destination: data.destination,
-      chain: data.chain,
-    });
-
-    const row = await this.prisma.withdrawalRequest.create({
-      data: {
+    if (remote.status === 'failed') {
+      await this.ledger.postJournal(
         organisationId,
-        walletId: wallet.id,
-        assetCode,
-        amount: new Prisma.Decimal(data.amount),
-        destination: data.destination,
-        chain: data.chain ?? 'ethereum-sepolia',
-        status: remote.status === 'confirmed' ? 'confirmed' : 'submitted',
-        providerRef: remote.providerRef,
-        txHash: remote.txHash,
-        journalId,
-        failureReason: remote.failureReason,
-        idempotencyKey,
-      },
-    });
+        {
+          reference: `withdrawal-reversal:${row.id}`,
+          description: `Reversal of failed withdrawal ${row.id}`,
+          lines: lines(true),
+        },
+        `wd-rev-${row.id}`,
+      );
+      row = await this.prisma.withdrawalRequest.update({
+        where: { id: row.id },
+        data: { status: 'failed', failureReason: remote.failureReason ?? 'Rejected by custody provider', providerRef: remote.providerRef },
+      });
+    } else {
+      row = await this.prisma.withdrawalRequest.update({
+        where: { id: row.id },
+        data: {
+          status: remote.status === 'confirmed' ? 'confirmed' : 'submitted',
+          providerRef: remote.providerRef,
+          txHash: remote.txHash,
+        },
+      });
+    }
+
+    await this.webhooks.publish(organisationId, `withdrawal.${row.status}`, this.serializeWithdrawal(row));
 
     return {
       ...this.serializeWithdrawal(row),
       mode: this.layer1.mode,
-      note:
-        this.layer1.mode === 'sandbox'
-          ? 'Sandbox withdrawal — no real broadcast.'
-          : undefined,
+      note: this.layer1.mode === 'sandbox' ? 'Sandbox withdrawal — no real broadcast.' : undefined,
     };
+  }
+
+  private replayWithdrawal(
+    existing: Parameters<WalletsService['serializeWithdrawal']>[0],
+    data: { walletId: string; amount: string; destination: string },
+    assetCode: string,
+  ) {
+    const same =
+      existing.walletId === data.walletId &&
+      existing.assetCode === assetCode &&
+      existing.destination === data.destination &&
+      parseDecimal(existing.amount.toFixed()) === parseDecimal(data.amount);
+    if (!same) {
+      throw new ConflictException({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: 'Idempotency key was already used with a different withdrawal',
+      });
+    }
+    return this.serializeWithdrawal(existing);
+  }
+
+  private safeReason(e: unknown): string {
+    const response = e instanceof BadRequestException ? e.getResponse() : undefined;
+    if (response && typeof response === 'object' && 'code' in response) return String((response as { code: unknown }).code);
+    return 'Ledger rejected the withdrawal';
   }
 
   async listWithdrawals(organisationId: string) {

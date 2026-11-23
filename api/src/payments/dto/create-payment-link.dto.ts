@@ -1,4 +1,4 @@
-import { IsObject, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { IsObject, IsOptional, IsString, Matches } from 'class-validator';
 
 export class CreatePaymentLinkDto {
   @IsOptional()

@@ -1,7 +1,13 @@
 /**
  * Sandbox FX rates — deterministic, not live market data.
  * Status: simulated
+ *
+ * All arithmetic is exact decimal (no floating point). Rounding policy:
+ *  - fee: round half-even to the source asset's scale
+ *  - target amount: round DOWN to the target asset's scale (never pay out more than quoted)
  */
+import { bpsOf, cmp, decimalPlaces, mul, roundToScale, sub } from '@durin/ledger';
+import { assetScale } from '../common/money';
 
 export type Asset = 'ZAR' | 'USDC' | 'USDT';
 
@@ -15,7 +21,7 @@ const SANDBOX_RATES: Record<string, string> = {
   'USDT/USDC': '1.001',
 };
 
-const FEE_BPS = 30; // 0.30% sandbox fee on source
+export const SANDBOX_FEE_BPS = 30; // 0.30% sandbox fee on source
 
 export function getSandboxRate(source: string, target: string): string {
   if (source === target) {
@@ -29,24 +35,30 @@ export function getSandboxRate(source: string, target: string): string {
   return rate;
 }
 
-/** fee and target amounts as decimal strings (simple string math via Number for sandbox only; ledger uses precise types). */
 export function computeQuote(sourceAsset: string, targetAsset: string, sourceAmount: string) {
-  const rate = getSandboxRate(sourceAsset.toUpperCase(), targetAsset.toUpperCase());
-  const src = Number(sourceAmount);
-  if (!(src > 0)) throw new Error('sourceAmount must be positive');
+  const source = sourceAsset.toUpperCase();
+  const target = targetAsset.toUpperCase();
+  const rate = getSandboxRate(source, target);
 
-  const fee = (src * FEE_BPS) / 10_000;
-  const netSource = src - fee;
-  const targetAmount = netSource * Number(rate);
+  if (cmp(sourceAmount, '0') <= 0) throw new Error('sourceAmount must be positive');
+  if (decimalPlaces(sourceAmount) > assetScale(source)) {
+    throw new Error(`${source} supports at most ${assetScale(source)} decimal places`);
+  }
+
+  const fee = roundToScale(bpsOf(sourceAmount, SANDBOX_FEE_BPS), assetScale(source), 'half_even');
+  const netSource = sub(sourceAmount, fee);
+  const targetAmount = roundToScale(mul(netSource, rate), assetScale(target), 'down');
+  if (cmp(targetAmount, '0') <= 0) throw new Error('Amount too small to convert');
 
   return {
     rate,
-    feeAmount: fee.toFixed(8).replace(/\.?0+$/, match => (match.includes('.') ? match.replace(/0+$/, '').replace(/\.$/, '') : match)) || '0',
-    feeAsset: sourceAsset.toUpperCase(),
-    targetAmount: targetAmount.toFixed(8).replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, ''),
-    sourceAmount: sourceAmount,
-    sourceAsset: sourceAsset.toUpperCase(),
-    targetAsset: targetAsset.toUpperCase(),
+    feeAmount: fee,
+    feeAsset: source,
+    targetAmount,
+    sourceAmount,
+    sourceAsset: source,
+    targetAsset: target,
+    feeBps: SANDBOX_FEE_BPS,
     expiresInSeconds: 60,
   };
 }

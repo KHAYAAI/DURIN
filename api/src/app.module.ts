@@ -15,7 +15,8 @@ import { WalletsModule } from './wallets/wallets.module';
 import { Layer1Module } from './providers/layer1/layer1.module';
 import { ComplianceModule } from './compliance/compliance.module';
 import { Layer2Module } from './providers/layer2/layer2.module';
-import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { RateLimitGuard } from './hardening/rate-limit.guard';
 import { MetaModule } from './meta/meta.module';
 import { ProductionSafety } from './hardening/production.guard';
@@ -50,6 +51,10 @@ import { ProductionSafety } from './hardening/production.guard';
     {
       provide: APP_GUARD,
       useClass: RateLimitGuard,
+    },
+    {
+      provide: APP_FILTER,
+      useClass: PrismaExceptionFilter,
     },
     ProductionSafety,
   ],

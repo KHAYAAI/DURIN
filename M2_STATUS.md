@@ -1,3 +1,5 @@
+> **Historical.** This describes the original scaffold. Several claims here were corrected or superseded; see [STATUS.md](STATUS.md).
+
 # M2 Double-Entry Ledger — Status
 
 **Status:** Implemented (domain + API + unit tests). Requires migrate + local run to verify end-to-end.

@@ -7,14 +7,19 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { WebhookDeliveryService } from '../webhooks/webhook-delivery.service';
+import { cmp, sub } from '@durin/ledger';
 import { computeQuote } from './fx.sandbox';
 import { buildConversionLines } from './journal-lines';
+import { assertPositiveAmount } from '../common/money';
+import { assertSandboxOnly } from '../common/sandbox';
 
 @Injectable()
 export class ConversionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ledger: LedgerService,
+    private readonly webhooks: WebhookDeliveryService,
   ) {}
 
   async createQuote(
@@ -23,9 +28,11 @@ export class ConversionsService {
     targetAsset: string,
     sourceAmount: string,
   ) {
+    assertSandboxOnly('Currency conversion quotes');
     if (sourceAsset.toUpperCase() === targetAsset.toUpperCase()) {
       throw new BadRequestException('sourceAsset and targetAsset must differ');
     }
+    assertPositiveAmount(sourceAmount, sourceAsset);
 
     let computed;
     try {
@@ -48,7 +55,7 @@ export class ConversionsService {
         feeAsset: computed.feeAsset,
         status: 'open',
         expiresAt,
-        metadata: { provider: 'sandbox', feeBps: 30 },
+        metadata: { provider: 'sandbox', feeBps: computed.feeBps },
       },
     });
 
@@ -73,29 +80,48 @@ export class ConversionsService {
     quoteId: string,
     idempotencyKey?: string,
   ) {
+    assertSandboxOnly('Currency conversion');
+
     if (idempotencyKey) {
       const existing = await this.prisma.conversion.findUnique({
-        where: {
-          organisationId_idempotencyKey: { organisationId, idempotencyKey },
-        },
+        where: { organisationId_idempotencyKey: { organisationId, idempotencyKey } },
       });
       if (existing) return this.serializeConversion(existing);
     }
 
-    const quote = await this.prisma.quote.findFirst({
-      where: { id: quoteId, organisationId },
-    });
+    if (!/^[0-9a-f-]{36}$/i.test(quoteId)) throw new NotFoundException('Quote not found');
+    const quote = await this.prisma.quote.findFirst({ where: { id: quoteId, organisationId } });
     if (!quote) throw new NotFoundException('Quote not found');
     if (quote.status !== 'open') {
       throw new BadRequestException(`Quote is ${quote.status}, not open`);
     }
     if (quote.expiresAt < new Date()) {
-      await this.prisma.quote.update({
-        where: { id: quote.id },
+      await this.prisma.quote.updateMany({
+        where: { id: quote.id, status: 'open' },
         data: { status: 'expired' },
       });
       throw new BadRequestException('Quote has expired');
     }
+
+    // Atomically claim the quote: of any number of concurrent accepts, exactly one proceeds.
+    const claimed = await this.prisma.quote.updateMany({
+      where: { id: quote.id, organisationId, status: 'open', expiresAt: { gt: new Date() } },
+      data: { status: 'accepted' },
+    });
+    if (claimed.count !== 1) {
+      if (idempotencyKey) {
+        const existing = await this.prisma.conversion.findUnique({
+          where: { organisationId_idempotencyKey: { organisationId, idempotencyKey } },
+        });
+        if (existing) return this.serializeConversion(existing);
+      }
+      throw new ConflictException('Quote is no longer open');
+    }
+    const releaseQuote = () =>
+      this.prisma.quote.updateMany({
+        where: { id: quote.id, status: 'accepted', expiresAt: { gt: new Date() } },
+        data: { status: 'open' },
+      });
 
     const sourceAsset = quote.sourceAsset;
     const targetAsset = quote.targetAsset;
@@ -103,104 +129,87 @@ export class ConversionsService {
     const targetAmount = quote.targetAmount.toFixed();
     const feeAmount = quote.feeAmount.toFixed();
 
-    // Settlement accounts for both assets
-    const sourceAccounts = await this.ensurePair(organisationId, sourceAsset);
-    const targetAccounts = await this.ensurePair(organisationId, targetAsset);
-
-    // Fee account (revenue) in source asset
-    const feeAccount = await this.ensureRevenueAccount(organisationId, sourceAsset);
-
-    // Build balanced multi-asset journal:
-    // 1) Reduce customer liability in source (debit liability) + reduce settlement asset source (credit asset)
-    // 2) Increase settlement asset target (debit asset) + increase customer liability target (credit liability)
-    // 3) Fee: debit customer liability source + credit fee revenue
-    //
-    // Simplified sandbox economic view:
-    // - Debit source liability (customer spends source)
-    // - Credit source asset (platform source inventory down) — skip if we model pure liability swap
-    // For sandbox clarity we do:
-    //   DR customer liability SOURCE (sourceAmount)
-    //   CR settlement asset SOURCE (sourceAmount - fee) 
-    //   CR fee revenue SOURCE (fee)
-    //   DR settlement asset TARGET (targetAmount)
-    //   CR customer liability TARGET (targetAmount)
-    //
-    // That requires source legs balanced and target legs balanced separately — validateJournalInput checks per asset.
-
-    const adjustedLines = buildConversionLines({
-      sourceAsset,
-      targetAsset,
-      sourceAmount,
-      targetAmount,
-      feeAmount,
-      sourceLiabilityId: sourceAccounts.liability.id,
-      sourceAssetId: sourceAccounts.asset.id,
-      targetLiabilityId: targetAccounts.liability.id,
-      targetAssetId: targetAccounts.asset.id,
-      feeRevenueId: feeAccount.id,
-    });
-
-    // Pre-fund sandbox: ensure source liability has enough available
-    await this.ensureSandboxLiquidity(
-      organisationId,
-      sourceAccounts,
-      sourceAmount,
-      sourceAsset,
-    );
-
     let journal;
     try {
+      const sourceAccounts = await this.ensurePair(organisationId, sourceAsset);
+      const targetAccounts = await this.ensurePair(organisationId, targetAsset);
+      const feeAccount = await this.ensureRevenueAccount(organisationId, sourceAsset);
+
+      // Balanced per asset: source legs net to zero, target legs net to zero.
+      // SANDBOX ACCOUNTING ONLY (see journal-lines.ts).
+      const lines = buildConversionLines({
+        sourceAsset,
+        targetAsset,
+        sourceAmount,
+        targetAmount,
+        feeAmount,
+        sourceLiabilityId: sourceAccounts.liability.id,
+        sourceAssetId: sourceAccounts.asset.id,
+        targetLiabilityId: targetAccounts.liability.id,
+        targetAssetId: targetAccounts.asset.id,
+        feeRevenueId: feeAccount.id,
+      });
+
+      await this.ensureSandboxLiquidity(organisationId, sourceAccounts, sourceAmount, sourceAsset, quote.id);
+
+      // The journal is keyed on the quote, so one quote can never be posted twice.
       journal = await this.ledger.postJournal(
         organisationId,
         {
           reference: `conversion:quote:${quote.id}`,
           description: `Convert ${sourceAmount} ${sourceAsset} → ${targetAmount} ${targetAsset}`,
-          lines: adjustedLines,
+          lines,
         },
-        idempotencyKey ? `conv-j-${idempotencyKey}` : `conv-j-${quote.id}`,
+        `conv-j-${quote.id}`,
       );
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : 'Ledger post failed';
-      const failed = await this.prisma.conversion.create({
-        data: {
-          organisationId,
-          quoteId: quote.id,
-          sourceAsset,
-          targetAsset,
-          sourceAmount: quote.sourceAmount,
-          targetAmount: quote.targetAmount,
-          rate: quote.rate,
-          feeAmount: quote.feeAmount,
-          status: 'failed',
-          failureReason: message,
-          idempotencyKey,
-        },
-      });
-      return this.serializeConversion(failed);
+      await releaseQuote();
+      // Business rejections (insufficient funds, bad accounts) are recorded as a failed
+      // conversion. Unexpected errors propagate; internal details are never echoed to clients.
+      if (e instanceof BadRequestException || e instanceof ConflictException) {
+        const response = e.getResponse();
+        const reason =
+          typeof response === 'object' && response && 'code' in response ? String((response as { code: unknown }).code) : 'LEDGER_REJECTED';
+        const failed = await this.prisma.conversion.create({
+          data: {
+            organisationId,
+            quoteId: quote.id,
+            sourceAsset,
+            targetAsset,
+            sourceAmount: quote.sourceAmount,
+            targetAmount: quote.targetAmount,
+            rate: quote.rate,
+            feeAmount: quote.feeAmount,
+            status: 'failed',
+            failureReason: reason,
+            idempotencyKey,
+          },
+        });
+        const serialized = this.serializeConversion(failed);
+        await this.webhooks.publish(organisationId, 'conversion.failed', serialized);
+        return serialized;
+      }
+      throw e;
     }
 
-    const [conversion] = await this.prisma.$transaction([
-      this.prisma.conversion.create({
-        data: {
-          organisationId,
-          quoteId: quote.id,
-          sourceAsset,
-          targetAsset,
-          sourceAmount: quote.sourceAmount,
-          targetAmount: quote.targetAmount,
-          rate: quote.rate,
-          feeAmount: quote.feeAmount,
-          status: 'settled',
-          journalId: journal.id,
-          idempotencyKey,
-          settledAt: new Date(),
-        },
-      }),
-      this.prisma.quote.update({
-        where: { id: quote.id },
-        data: { status: 'accepted' },
-      }),
-    ]);
+    const conversion = await this.prisma.conversion.create({
+      data: {
+        organisationId,
+        quoteId: quote.id,
+        sourceAsset,
+        targetAsset,
+        sourceAmount: quote.sourceAmount,
+        targetAmount: quote.targetAmount,
+        rate: quote.rate,
+        feeAmount: quote.feeAmount,
+        status: 'settled',
+        journalId: journal.id,
+        idempotencyKey,
+        settledAt: new Date(),
+      },
+    });
+
+    await this.webhooks.publish(organisationId, 'conversion.settled', this.serializeConversion(conversion));
 
     return {
       ...this.serializeConversion(conversion),
@@ -228,103 +237,64 @@ export class ConversionsService {
   }
 
   private async ensurePair(organisationId: string, assetCode: string) {
-    const assetCodeUp = assetCode.toUpperCase();
-    const assetKey = `SETTLEMENT-ASSET-${assetCodeUp}`;
-    const liabKey = `SETTLEMENT-LIAB-${assetCodeUp}`;
-
-    let asset = await this.prisma.ledgerAccount.findUnique({
-      where: { organisationId_code: { organisationId, code: assetKey } },
+    const code = assetCode.toUpperCase();
+    const asset = await this.ledger.ensureAccount(organisationId, {
+      code: `SETTLEMENT-ASSET-${code}`,
+      name: `Settlement asset ${code}`,
+      accountType: 'asset',
+      assetCode: code,
     });
-    if (!asset) {
-      const created = await this.ledger.createAccount(organisationId, {
-        code: assetKey,
-        name: `Settlement asset ${assetCodeUp}`,
-        accountType: 'asset',
-        assetCode: assetCodeUp,
-      });
-      asset = await this.prisma.ledgerAccount.findUniqueOrThrow({ where: { id: created.id } });
-    }
-
-    let liability = await this.prisma.ledgerAccount.findUnique({
-      where: { organisationId_code: { organisationId, code: liabKey } },
+    const liability = await this.ledger.ensureAccount(organisationId, {
+      code: `SETTLEMENT-LIAB-${code}`,
+      name: `Customer liability ${code}`,
+      accountType: 'liability',
+      assetCode: code,
     });
-    if (!liability) {
-      const created = await this.ledger.createAccount(organisationId, {
-        code: liabKey,
-        name: `Customer liability ${assetCodeUp}`,
-        accountType: 'liability',
-        assetCode: assetCodeUp,
-      });
-      liability = await this.prisma.ledgerAccount.findUniqueOrThrow({
-        where: { id: created.id },
-      });
-    }
-
     return { asset, liability };
   }
 
   private async ensureRevenueAccount(organisationId: string, assetCode: string) {
-    const code = `FEE-REVENUE-${assetCode.toUpperCase()}`;
-    let acc = await this.prisma.ledgerAccount.findUnique({
-      where: { organisationId_code: { organisationId, code } },
+    const code = assetCode.toUpperCase();
+    return this.ledger.ensureAccount(organisationId, {
+      code: `FEE-REVENUE-${code}`,
+      name: `Fee revenue ${code}`,
+      accountType: 'revenue',
+      assetCode: code,
     });
-    if (!acc) {
-      const created = await this.ledger.createAccount(organisationId, {
-        code,
-        name: `Fee revenue ${assetCode.toUpperCase()}`,
-        accountType: 'revenue',
-        assetCode: assetCode.toUpperCase(),
-      });
-      acc = await this.prisma.ledgerAccount.findUniqueOrThrow({ where: { id: created.id } });
-    }
-    return acc;
   }
 
   /**
-   * Sandbox helper: if customer liability available is insufficient, post an opening
-   * deposit so conversion demos work without a prior payment_intent settle.
+   * SANDBOX ONLY. If the customer liability is short, post an opening deposit for exactly the
+   * shortfall so conversion demos work without a prior payment. This creates balances from
+   * nothing, so it is refused outside sandbox mode (see common/sandbox.ts).
    */
   private async ensureSandboxLiquidity(
     organisationId: string,
     accounts: { asset: { id: string }; liability: { id: string } },
     required: string,
     assetCode: string,
+    quoteId: string,
   ) {
+    assertSandboxOnly('Sandbox pre-funding');
     const balance = await this.prisma.balance.findUnique({
       where: { accountId: accounts.liability.id },
     });
     const available = balance ? balance.available.toFixed() : '0';
-    if (Number(available) >= Number(required)) return;
+    if (cmp(available, required) >= 0) return;
 
-    const topUp = (Number(required) - Number(available) + 1).toFixed(2);
+    const shortfall = sub(required, available);
     await this.ledger.postJournal(
       organisationId,
       {
         reference: 'sandbox-prefund',
-        description: `Sandbox pre-fund ${topUp} ${assetCode}`,
+        description: `Sandbox pre-fund ${shortfall} ${assetCode}`,
         lines: [
-          {
-            accountId: accounts.asset.id,
-            direction: 'debit',
-            amount: topUp,
-            assetCode,
-          },
-          {
-            accountId: accounts.liability.id,
-            direction: 'credit',
-            amount: topUp,
-            assetCode,
-          },
+          { accountId: accounts.asset.id, direction: 'debit', amount: shortfall, assetCode },
+          { accountId: accounts.liability.id, direction: 'credit', amount: shortfall, assetCode },
         ],
       },
-      `sandbox-prefund-${accounts.liability.id}-${Date.now()}`,
+      `sandbox-prefund-${quoteId}`,
     );
-  }
-
-  private subDecimal(a: string, b: string): string {
-    const result = Number(a) - Number(b);
-    if (result < 0) throw new BadRequestException('Invalid fee relative to source amount');
-    return result.toFixed(8).replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
   }
 
   private serializeQuote(q: {

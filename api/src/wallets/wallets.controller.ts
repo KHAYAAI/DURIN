@@ -1,3 +1,4 @@
+import { IsString, Matches } from 'class-validator';
 import {
   Body,
   Controller,
@@ -18,6 +19,9 @@ import { RequestContext } from '../common/request-context';
 import { SCOPES } from '../common/scopes';
 
 class SimulateDepositDto {
+  /** Decimal string, e.g. "50.00" */
+  @IsString()
+  @Matches(/^\d+(\.\d+)?$/)
   amount!: string;
 }
 

@@ -1,6 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { add, cmp, parseDecimal } from '@durin/ledger';
+import { assertPositiveAmount } from '../common/money';
+import { assertSandboxOnly } from '../common/sandbox';
 
 @Injectable()
 export class ComplianceService {
@@ -29,6 +32,9 @@ export class ComplianceService {
 
   /** Sandbox: auto-approve after create for demo flows */
   async simulateApproveVerification(organisationId: string, id: string) {
+    // A tenant must never be able to approve its own KYB/KYC. Sandbox only.
+    assertSandboxOnly('Simulated verification approval');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new NotFoundException('Verification not found');
     const rec = await this.prisma.verificationRecord.findFirst({
       where: { id, organisationId },
     });
@@ -55,7 +61,9 @@ export class ComplianceService {
     subjectId: string,
     screeningType: string,
   ) {
-    // Sandbox: always clear unless subjectId contains "sanction"
+    // Sandbox: always clear unless subjectId contains "sanction".
+    // Tenant-created results carry no weight, so this is refused outside sandbox mode.
+    assertSandboxOnly('Simulated screening');
     const hit = subjectId.toLowerCase().includes('sanction');
     const row = await this.prisma.screeningResult.create({
       data: {
@@ -91,6 +99,8 @@ export class ComplianceService {
     name: string,
     opts: { assetCode?: string; dailyLimit?: string; perTxLimit?: string },
   ) {
+    if (opts.dailyLimit) assertPositiveAmount(opts.dailyLimit);
+    if (opts.perTxLimit) assertPositiveAmount(opts.perTxLimit);
     const row = await this.prisma.limitPolicy.create({
       data: {
         organisationId,
@@ -137,11 +147,37 @@ export class ComplianceService {
         OR: [{ assetCode: assetCode.toUpperCase() }, { assetCode: null }],
       },
     });
+    try {
+      parseDecimal(amount);
+    } catch {
+      return { allowed: false, reason: 'Invalid amount' };
+    }
+    // Rolling 24h outflow for the asset (withdrawals that have not failed or been cancelled).
+    const needsDaily = policies.some((p) => p.dailyLimit);
+    let outflow24h = '0';
+    if (needsDaily) {
+      const rows = await this.prisma.withdrawalRequest.findMany({
+        where: {
+          organisationId,
+          assetCode: assetCode.toUpperCase(),
+          status: { notIn: ['failed', 'cancelled'] },
+          createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+        select: { amount: true },
+      });
+      outflow24h = rows.reduce((sum, r) => add(sum, r.amount.toFixed()), '0');
+    }
     for (const p of policies) {
-      if (p.perTxLimit && Number(amount) > Number(p.perTxLimit.toFixed())) {
+      if (p.perTxLimit && cmp(amount, p.perTxLimit.toFixed()) > 0) {
         return {
           allowed: false,
           reason: `Exceeds per-tx limit ${p.perTxLimit.toFixed()} on policy ${p.name}`,
+        };
+      }
+      if (p.dailyLimit && cmp(add(outflow24h, amount), p.dailyLimit.toFixed()) > 0) {
+        return {
+          allowed: false,
+          reason: `Exceeds daily limit ${p.dailyLimit.toFixed()} on policy ${p.name}`,
         };
       }
     }
@@ -154,7 +190,9 @@ export class ComplianceService {
     resourceId: string,
     amount?: string,
     assetCode?: string,
+    requestedBy?: string,
   ) {
+    if (amount) assertPositiveAmount(amount, assetCode);
     const row = await this.prisma.approvalRequest.create({
       data: {
         organisationId,
@@ -163,34 +201,42 @@ export class ComplianceService {
         amount: amount ? new Prisma.Decimal(amount) : null,
         assetCode: assetCode?.toUpperCase(),
         status: 'pending',
+        requestedBy,
       },
     });
-    await this.audit(organisationId, 'api_key', null, 'approval.requested', resourceType, resourceId);
+    await this.audit(organisationId, 'api_key', requestedBy ?? null, 'approval.requested', resourceType, resourceId);
     return this.serApproval(row);
   }
 
+  /**
+   * Four-eyes: the key that requested an approval cannot decide it. The decision is applied with
+   * a compare-and-set on `pending`, so two concurrent decisions cannot both succeed.
+   */
   async decideApproval(
     organisationId: string,
     id: string,
     decision: 'approved' | 'rejected',
     note?: string,
+    actorId?: string,
   ) {
-    const row = await this.prisma.approvalRequest.findFirst({
-      where: { id, organisationId },
-    });
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new NotFoundException('Approval not found');
+    const row = await this.prisma.approvalRequest.findFirst({ where: { id, organisationId } });
     if (!row) throw new NotFoundException('Approval not found');
-    if (row.status !== 'pending') {
-      throw new BadRequestException(`Approval already ${row.status}`);
+    if (row.requestedBy && actorId && row.requestedBy === actorId) {
+      throw new ForbiddenException({
+        code: 'FOUR_EYES_REQUIRED',
+        message: 'The key that requested an approval cannot decide it. Use a different API key.',
+      });
     }
-    const updated = await this.prisma.approvalRequest.update({
-      where: { id },
-      data: {
-        status: decision,
-        decisionNote: note,
-        decidedBy: 'api',
-      },
+    const decided = await this.prisma.approvalRequest.updateMany({
+      where: { id, organisationId, status: 'pending' },
+      data: { status: decision, decisionNote: note, decidedBy: actorId ?? 'api' },
     });
-    await this.audit(organisationId, 'api_key', null, `approval.${decision}`, 'approval', id);
+    if (decided.count !== 1) {
+      throw new BadRequestException(`Approval already ${row.status === 'pending' ? 'decided' : row.status}`);
+    }
+    const updated = await this.prisma.approvalRequest.findUniqueOrThrow({ where: { id } });
+    await this.audit(organisationId, 'api_key', actorId ?? null, `approval.${decision}`, 'approval', id);
     return this.serApproval(updated);
   }
 

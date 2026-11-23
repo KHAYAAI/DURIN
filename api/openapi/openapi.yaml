@@ -1,10 +1,31 @@
 openapi: 3.1.0
 info:
   title: DURIN API
-  version: 0.8.0
+  version: 0.1.0
   description: |
     Institutional digital financial infrastructure (FORGE Layer 3).
-    Sandbox by default. Amounts are decimal strings. Idempotency-Key required on financial POSTs.
+
+    **Status: sandbox only.** All money movement is simulated. Live ZAR/USDC conversion is awaiting
+    regulatory approval and live custody/fiat providers are awaiting credentials. This API is not
+    production-ready.
+
+    **Conventions**
+    - Amounts are exact decimal strings (e.g. `"1000.50"`), never numbers. ZAR allows 2 decimal
+      places; USDC and USDT allow 6.
+    - Authenticate with `Authorization: Bearer dk_test_...`. Keys are scoped; a key can only grant
+      scopes it holds, and only `admin` keys can grant `admin`.
+    - Send `Idempotency-Key` on every mutating request. The same key with the same request replays
+      the original response (header `Idempotent-Replayed: true`); the same key with a different
+      request returns `409 IDEMPOTENCY_KEY_REUSED`; a request still running returns
+      `409 IDEMPOTENCY_IN_PROGRESS`. Keys are scoped per organisation.
+    - Errors are JSON with `statusCode`, `code` and `message`. Money-movement refusals use stable
+      codes such as `NEGATIVE_BALANCE`, `LIMIT_EXCEEDED`, `UNBALANCED_JOURNAL`.
+    - Endpoints marked *sandbox only* return `403 AWAITING_REGULATORY_APPROVAL` in production.
+
+    **Webhooks.** Events are queued durably and delivered at-least-once with exponential backoff
+    (up to 8 attempts). Each request carries `DURIN-Signature: t=<unix>,v1=<hmac>` where the HMAC is
+    SHA-256 over `"<t>.<raw body>"` with the endpoint's signing secret. Verify against the raw body
+    and reject timestamps older than 5 minutes; de-duplicate on the event `id`.
   contact:
     name: DURIN Engineering
 servers:
@@ -291,10 +312,12 @@ paths:
   /compliance/verifications/{id}/simulate_approve:
     post:
       tags: [Compliance]
+      summary: Approve a verification (sandbox only)
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
-        '200': { description: Approved }
+        '201': { description: Approved }
+        '403': { $ref: '#/components/responses/Error' }
   /compliance/screenings:
     post:
       tags: [Compliance]
@@ -321,10 +344,14 @@ paths:
   /compliance/approvals/{id}/decide:
     post:
       tags: [Compliance]
+      summary: Decide an approval request
+      description: Four-eyes. The API key that requested an approval cannot decide it (`403 FOUR_EYES_REQUIRED`). Only one decision can succeed.
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
-        '200': { description: Decided }
+        '201': { description: Decided }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
   /compliance/audit:
     get:
       tags: [Compliance]
@@ -346,7 +373,42 @@ paths:
         - $ref: '#/components/parameters/Id'
       responses:
         '200': { description: Deleted }
+  /webhook_endpoints/{id}/rotate_secret:
+    post:
+      tags: [Webhooks]
+      summary: Rotate the signing secret (returned once)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '201': { description: New secret }
+  /webhook_endpoints/{id}/deliveries:
+    get:
+      tags: [Webhooks]
+      summary: Delivery log (status, attempts, last response) for an endpoint
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: OK }
+  /ledger/integrity:
+    get:
+      tags: [Ledger]
+      summary: Re-derive every balance from posted entries and check every journal balances (admin scope)
+      responses:
+        '200': { description: "`healthy: true` when no drift and no unbalanced journals" }
+  /version:
+    get:
+      tags: [Meta]
+      summary: Version, mode and honest capability statuses
+      security: []
+      responses:
+        '200': { description: OK }
 components:
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
   securitySchemes:
     ApiKeyAuth:
       type: http
@@ -364,6 +426,13 @@ components:
       required: false
       schema: { type: string }
   schemas:
+    Error:
+      type: object
+      required: [statusCode, message]
+      properties:
+        statusCode: { type: integer }
+        code: { type: string, description: Stable machine-readable error code }
+        message: { type: string }
     CreateAccount:
       type: object
       required: [code, name, accountType, assetCode]

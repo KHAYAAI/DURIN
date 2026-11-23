@@ -1,4 +1,5 @@
 import { randomBytes } from 'crypto';
+import { cmp, sub } from '@durin/ledger';
 import {
   AssetBalance,
   CreateAddressParams,
@@ -19,7 +20,7 @@ export class SandboxLayer1Adapter implements Layer1Port {
 
   private balances = new Map<string, Map<string, string>>(); // walletRef -> asset -> amount
 
-  async createWallet(params: CreateWalletParams): Promise<{ externalRef: string }> {
+  async createWallet(_params: CreateWalletParams): Promise<{ externalRef: string }> {
     const externalRef = `sbx_wallet_${randomBytes(8).toString('hex')}`;
     this.balances.set(externalRef, new Map());
     return { externalRef };
@@ -51,14 +52,12 @@ export class SandboxLayer1Adapter implements Layer1Port {
 
   async requestWithdrawal(params: WithdrawalParams): Promise<WithdrawalResult> {
     const map = this.balances.get(params.walletExternalRef) ?? new Map();
-    const current = Number(map.get(params.assetCode.toUpperCase()) ?? '0');
-    const amount = Number(params.amount);
-    if (amount > current) {
-      // In pure sandbox we still "submit" — platform ledger enforces funds
-    }
+    const current = map.get(params.assetCode.toUpperCase()) ?? '0';
+    // In pure sandbox we still "submit" when the simulated balance is short; the platform
+    // ledger is what enforces customer funds. The simulated balance floors at zero.
+    const next = cmp(current, params.amount) >= 0 ? sub(current, params.amount) : '0';
     const txHash = `0xsim${randomBytes(16).toString('hex')}`;
-    const next = Math.max(0, current - amount);
-    map.set(params.assetCode.toUpperCase(), next.toFixed(8));
+    map.set(params.assetCode.toUpperCase(), next);
     this.balances.set(params.walletExternalRef, map);
 
     return {
@@ -68,7 +67,7 @@ export class SandboxLayer1Adapter implements Layer1Port {
     };
   }
 
-  async simulateDeposit(params: {
+  async simulateDeposit(_params: {
     address: string;
     assetCode: string;
     amount: string;

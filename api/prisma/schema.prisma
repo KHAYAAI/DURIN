@@ -105,16 +105,44 @@ model WebhookEndpoint {
   id             String   @id @default(uuid()) @db.Uuid
   organisationId String   @map("organisation_id") @db.Uuid
   url            String
-  secretHash     String   @map("secret_hash")
+  /// AES-256-GCM encrypted signing secret (see common/crypto-secrets.ts). Never stored in plaintext.
+  secretEnc      String   @map("secret_enc")
   events         String[] @default([])
   status         String   @default("active")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  organisation Organisation      @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  deliveries   WebhookDelivery[]
 
   @@index([organisationId])
   @@map("webhook_endpoints")
+}
+
+/// Durable outbox of webhook events. Written in the request path, delivered by a worker with
+/// retries, so a slow or failing customer endpoint never blocks the API.
+model WebhookDelivery {
+  id             String    @id @default(uuid()) @db.Uuid
+  organisationId String    @map("organisation_id") @db.Uuid
+  endpointId     String    @map("endpoint_id") @db.Uuid
+  eventId        String    @map("event_id")
+  eventType      String    @map("event_type")
+  payload        Json
+  status         String    @default("pending") // pending | succeeded | failed
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime  @default(now()) @map("next_attempt_at")
+  lastStatus     Int?      @map("last_status")
+  lastError      String?   @map("last_error")
+  deliveredAt    DateTime? @map("delivered_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@unique([endpointId, eventId])
+  @@index([status, nextAttemptAt])
+  @@index([organisationId])
+  @@map("webhook_deliveries")
 }
 
 // ─── M2 Ledger ───────────────────────────────────────────────
@@ -174,7 +202,7 @@ model JournalLine {
   id        String   @id @default(uuid()) @db.Uuid
   journalId String   @map("journal_id") @db.Uuid
   accountId String   @map("account_id") @db.Uuid
-  direction String   // debit | credit
+  direction String // debit | credit
   amount    Decimal  @db.Decimal(36, 18)
   assetCode String   @map("asset_code")
   metadata  Json?
@@ -220,23 +248,23 @@ enum PaymentIntentStatus {
 }
 
 model PaymentIntent {
-  id                   String              @id @default(uuid()) @db.Uuid
-  organisationId       String              @map("organisation_id") @db.Uuid
-  amount               Decimal             @db.Decimal(36, 18)
-  assetCode            String              @map("asset_code")
-  status               PaymentIntentStatus @default(created)
-  description          String?
-  customerReference    String?             @map("customer_reference")
-  metadata             Json?
+  id                  String              @id @default(uuid()) @db.Uuid
+  organisationId      String              @map("organisation_id") @db.Uuid
+  amount              Decimal             @db.Decimal(36, 18)
+  assetCode           String              @map("asset_code")
+  status              PaymentIntentStatus @default(created)
+  description         String?
+  customerReference   String?             @map("customer_reference")
+  metadata            Json?
   /// Simulated deposit address / instruction for sandbox stablecoin payment
-  paymentInstructions  Json?               @map("payment_instructions")
-  journalId            String?             @map("journal_id") @db.Uuid
-  idempotencyKey       String?             @map("idempotency_key")
-  expiresAt            DateTime?           @map("expires_at")
-  confirmedAt          DateTime?           @map("confirmed_at")
-  settledAt            DateTime?           @map("settled_at")
-  createdAt            DateTime            @default(now()) @map("created_at")
-  updatedAt            DateTime            @updatedAt @map("updated_at")
+  paymentInstructions Json?               @map("payment_instructions")
+  journalId           String?             @map("journal_id") @db.Uuid
+  idempotencyKey      String?             @map("idempotency_key")
+  expiresAt           DateTime?           @map("expires_at")
+  confirmedAt         DateTime?           @map("confirmed_at")
+  settledAt           DateTime?           @map("settled_at")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
 
   links PaymentLink[]
 
@@ -286,19 +314,19 @@ enum ConversionStatus {
 }
 
 model Quote {
-  id              String      @id @default(uuid()) @db.Uuid
-  organisationId  String      @map("organisation_id") @db.Uuid
-  sourceAsset     String      @map("source_asset")
-  targetAsset     String      @map("target_asset")
-  sourceAmount    Decimal     @map("source_amount") @db.Decimal(36, 18)
-  targetAmount    Decimal     @map("target_amount") @db.Decimal(36, 18)
-  rate            Decimal     @db.Decimal(36, 18)
-  feeAmount       Decimal     @default(0) @map("fee_amount") @db.Decimal(36, 18)
-  feeAsset        String      @map("fee_asset")
-  status          QuoteStatus @default(open)
-  expiresAt       DateTime    @map("expires_at")
-  metadata        Json?
-  createdAt       DateTime    @default(now()) @map("created_at")
+  id             String      @id @default(uuid()) @db.Uuid
+  organisationId String      @map("organisation_id") @db.Uuid
+  sourceAsset    String      @map("source_asset")
+  targetAsset    String      @map("target_asset")
+  sourceAmount   Decimal     @map("source_amount") @db.Decimal(36, 18)
+  targetAmount   Decimal     @map("target_amount") @db.Decimal(36, 18)
+  rate           Decimal     @db.Decimal(36, 18)
+  feeAmount      Decimal     @default(0) @map("fee_amount") @db.Decimal(36, 18)
+  feeAsset       String      @map("fee_asset")
+  status         QuoteStatus @default(open)
+  expiresAt      DateTime    @map("expires_at")
+  metadata       Json?
+  createdAt      DateTime    @default(now()) @map("created_at")
 
   conversions Conversion[]
 
@@ -447,7 +475,7 @@ model ScreeningResult {
   subjectId      String   @map("subject_id")
   screeningType  String   @map("screening_type") // sanctions | wallet | adverse_media
   provider       String   @default("sandbox")
-  result         String   // clear | hit | error
+  result         String // clear | hit | error
   details        Json?
   createdAt      DateTime @default(now()) @map("created_at")
 

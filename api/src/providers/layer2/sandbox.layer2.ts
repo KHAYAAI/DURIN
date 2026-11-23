@@ -31,14 +31,14 @@ export class SandboxLayer2Adapter implements Layer2Port {
     };
   }
 
-  async initiatePayout(params: FiatPayoutParams): Promise<FiatPayoutResult> {
+  async initiatePayout(_params: FiatPayoutParams): Promise<FiatPayoutResult> {
     return {
       providerRef: `fm_pay_${randomBytes(6).toString('hex')}`,
       status: 'settled',
     };
   }
 
-  async getSettlementBalance(currency: 'ZAR' | 'USD') {
+  async getSettlementBalance(_currency: 'ZAR' | 'USD') {
     return { available: '0.00' };
   }
 }

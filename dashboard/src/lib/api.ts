@@ -1,5 +1,15 @@
-const BASE = process.env.NEXT_PUBLIC_DURIN_API_URL || 'http://localhost:3000/v1';
-const KEY = process.env.NEXT_PUBLIC_DURIN_API_KEY || '';
+import 'server-only';
+
+/**
+ * Server-side DURIN API client. `server-only` makes the build fail if this module is ever
+ * imported into browser code, so the API key can never be shipped to the client.
+ *
+ * Configure with DURIN_API_URL and DURIN_API_KEY (deliberately NOT NEXT_PUBLIC_*, which Next.js
+ * inlines into browser bundles). Use a key with read-only scopes
+ * (organisations:read payments:read conversions:read wallets:read compliance:read).
+ */
+const BASE = process.env.DURIN_API_URL || 'http://localhost:3000/v1';
+const KEY = process.env.DURIN_API_KEY || '';
 
 export async function durinFetch<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
@@ -11,10 +21,11 @@ export async function durinFetch<T = unknown>(path: string, init?: RequestInit):
     ...init,
     headers,
     cache: 'no-store',
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`${res.status} ${text}`);
+    // Do not echo response bodies into the UI: they may contain internals.
+    throw new Error(`API responded ${res.status}`);
   }
   return res.json() as Promise<T>;
 }

@@ -1,3 +1,5 @@
+> **Historical.** This describes the original scaffold. Several claims here were corrected or superseded; see [STATUS.md](STATUS.md).
+
 # M3 Payments (Sandbox) — Status
 
 **Status:** Implemented (sandbox). No real chain monitoring or banking rails.

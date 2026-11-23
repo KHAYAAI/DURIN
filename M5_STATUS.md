@@ -1,3 +1,5 @@
+> **Historical.** This describes the original scaffold. Several claims here were corrected or superseded; see [STATUS.md](STATUS.md).
+
 # M5 Wallets & Layer 1 Port — Status
 
 **Status:** Implemented (sandbox adapter). Live custody = `awaiting credentials`.

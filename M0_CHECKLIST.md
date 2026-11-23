@@ -1,3 +1,5 @@
+> **Historical.** This describes the original scaffold. Several claims here were corrected or superseded; see [STATUS.md](STATUS.md).
+
 # M0 Foundations — Checklist
 
 - [x] Monorepo (pnpm workspaces)

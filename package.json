@@ -1,0 +1,25 @@
+{
+  "name": "durin",
+  "private": true,
+  "version": "0.1.0",
+  "description": "DURIN \u2014 Institutional digital financial infrastructure (Layer 3, FORGE stack)",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev:api": "pnpm --filter @durin/api dev",
+    "dev:dashboard": "pnpm --filter @durin/dashboard dev",
+    "test": "pnpm -r run test",
+    "test:integration": "pnpm --filter @durin/api run test:integration",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "db:generate": "pnpm --filter @durin/api prisma:generate",
+    "db:migrate": "pnpm --filter @durin/api db:migrate",
+    "db:studio": "pnpm --filter @durin/api prisma:studio",
+    "loadtest": "node scripts/load-test-health.mjs",
+    "bootstrap": "bash scripts/bootstrap-local.sh",
+    "build:packages": "pnpm --filter @durin/shared --filter @durin/ledger run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.28.0"
+}

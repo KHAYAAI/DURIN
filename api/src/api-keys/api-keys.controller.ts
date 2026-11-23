@@ -15,7 +15,7 @@ export class ApiKeysController {
   @Post()
   @RequireScopes(SCOPES.API_KEYS_WRITE)
   create(@CurrentOrg() ctx: RequestContext, @Body() dto: CreateApiKeyDto) {
-    return this.apiKeys.create(ctx.organisationId, dto.name, dto.scopes);
+    return this.apiKeys.create(ctx.organisationId, dto.name, dto.scopes, ctx.scopes);
   }
 
   @Get()

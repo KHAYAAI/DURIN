@@ -1,7 +1,12 @@
 /**
  * Build balanced multi-asset conversion journal lines.
- * Source legs sum to 0 net; target legs sum to 0 net.
+ * Source legs sum to 0 net; target legs sum to 0 net. Exact decimal arithmetic only.
+ *
+ * SANDBOX ACCOUNTING ONLY: this models a pure settlement-account swap for demos. A live
+ * conversion needs liquidity-provider clearing accounts and receivables (see DATABASE_SCHEMA
+ * conversion journals) and must be redesigned before gate G1 opens.
  */
+import { cmp, sub } from '@durin/ledger';
 
 export interface SimpleLine {
   accountId: string;
@@ -22,65 +27,23 @@ export function buildConversionLines(params: {
   targetAssetId: string;
   feeRevenueId: string;
 }): SimpleLine[] {
-  const fee = Number(params.feeAmount);
-  const src = Number(params.sourceAmount);
-  const net = src - fee;
-  if (net < 0) throw new Error('Fee exceeds source amount');
+  const net = sub(params.sourceAmount, params.feeAmount);
+  if (cmp(net, '0') < 0) throw new Error('Fee exceeds source amount');
+  const hasFee = cmp(params.feeAmount, '0') > 0;
 
-  const netStr = trimNum(net);
-  const feeStr = trimNum(fee);
-  const srcStr = trimNum(src);
-  const tgtStr = trimNum(Number(params.targetAmount));
+  const lines: SimpleLine[] = [
+    { accountId: params.sourceLiabilityId, direction: 'debit', amount: params.sourceAmount, assetCode: params.sourceAsset },
+  ];
 
-  const lines: SimpleLine[] = [];
-
-  // Source asset balanced block
-  lines.push({
-    accountId: params.sourceLiabilityId,
-    direction: 'debit',
-    amount: srcStr,
-    assetCode: params.sourceAsset,
-  });
-
-  if (fee > 0) {
-    lines.push({
-      accountId: params.sourceAssetId,
-      direction: 'credit',
-      amount: netStr,
-      assetCode: params.sourceAsset,
-    });
-    lines.push({
-      accountId: params.feeRevenueId,
-      direction: 'credit',
-      amount: feeStr,
-      assetCode: params.sourceAsset,
-    });
+  if (hasFee) {
+    lines.push({ accountId: params.sourceAssetId, direction: 'credit', amount: net, assetCode: params.sourceAsset });
+    lines.push({ accountId: params.feeRevenueId, direction: 'credit', amount: params.feeAmount, assetCode: params.sourceAsset });
   } else {
-    lines.push({
-      accountId: params.sourceAssetId,
-      direction: 'credit',
-      amount: srcStr,
-      assetCode: params.sourceAsset,
-    });
+    lines.push({ accountId: params.sourceAssetId, direction: 'credit', amount: params.sourceAmount, assetCode: params.sourceAsset });
   }
 
-  // Target asset balanced block
-  lines.push({
-    accountId: params.targetAssetId,
-    direction: 'debit',
-    amount: tgtStr,
-    assetCode: params.targetAsset,
-  });
-  lines.push({
-    accountId: params.targetLiabilityId,
-    direction: 'credit',
-    amount: tgtStr,
-    assetCode: params.targetAsset,
-  });
+  lines.push({ accountId: params.targetAssetId, direction: 'debit', amount: params.targetAmount, assetCode: params.targetAsset });
+  lines.push({ accountId: params.targetLiabilityId, direction: 'credit', amount: params.targetAmount, assetCode: params.targetAsset });
 
   return lines;
-}
-
-function trimNum(n: number): string {
-  return n.toFixed(8).replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
 }

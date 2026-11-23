@@ -1,29 +1,67 @@
+# Local development stack. Secrets come from .env (see .env.example); nothing is hardcoded.
+#
+#   cp .env.example .env   # then set the passwords
+#   docker compose -f infrastructure/docker-compose.yml up -d postgres          # database only
+#   docker compose -f infrastructure/docker-compose.yml --profile app up -d --build   # + migrate, api, dashboard
+#
+# Status: written but NOT yet exercised in CI/with a Docker daemon. The same steps were verified
+# by hand outside Docker (pruned `pnpm deploy` bundle + smoke test).
+name: durin
+
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: durin
-      POSTGRES_PASSWORD: durin
+      POSTGRES_USER: ${POSTGRES_USER:-durin_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: durin
+      DURIN_APP_PASSWORD: ${DURIN_APP_PASSWORD:?set DURIN_APP_PASSWORD in .env}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432" # loopback only
     volumes:
       - durin_pg:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U durin -d durin"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d durin"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  redis:
-    image: redis:7-alpine
+  migrate:
+    profiles: ["app"]
+    build: { context: .., dockerfile: docker/Dockerfile.api }
+    command: ["node", "scripts/migrate.mjs"]
+    environment:
+      MIGRATION_DATABASE_URL: postgresql://${POSTGRES_USER:-durin_owner}:${POSTGRES_PASSWORD}@postgres:5432/durin
+      DURIN_RUNTIME_ROLE: durin_app
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    profiles: ["app"]
+    build: { context: .., dockerfile: docker/Dockerfile.api }
+    environment:
+      NODE_ENV: development # local stack runs the sandbox; the image default is production (fail-closed)
+      DATABASE_URL: postgresql://durin_app:${DURIN_APP_PASSWORD}@postgres:5432/durin
+      DURIN_ENCRYPTION_KEY: ${DURIN_ENCRYPTION_KEY:-}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
     ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  dashboard:
+    profiles: ["app"]
+    build: { context: .., dockerfile: docker/Dockerfile.dashboard }
+    environment:
+      DURIN_API_URL: http://api:3000/v1
+      DURIN_API_KEY: ${DURIN_API_KEY:-}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      DASHBOARD_USER: ${DASHBOARD_USER:-admin}
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      - api
 
 volumes:
   durin_pg:

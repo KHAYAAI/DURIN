@@ -1,3 +1,5 @@
+> **Historical.** This describes the original scaffold. Several claims here were corrected or superseded; see [STATUS.md](STATUS.md).
+
 # M7 Dashboard — Status
 
 Next.js institutional shell at `apps/dashboard`:

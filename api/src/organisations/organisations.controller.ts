@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Post, UseGuards } from '@nestjs/common';
+import { assertBootstrapAllowed } from '../common/bootstrap';
 import { OrganisationsService } from './organisations.service';
 import { CreateOrganisationDto } from './dto/create-organisation.dto';
 import { ApiKeyGuard } from '../auth/api-key.guard';
@@ -17,8 +18,9 @@ export class OrganisationsController {
    * Status: implemented (dev), awaiting regulatory / commercial controls for production.
    */
   @Post()
-  create(@Body() dto: CreateOrganisationDto) {
-    return this.organisations.create(dto.name, dto.ownerEmail, dto.ownerName);
+  create(@Body() dto: CreateOrganisationDto, @Headers('x-bootstrap-token') bootstrapToken?: string) {
+    assertBootstrapAllowed(bootstrapToken);
+    return this.organisations.create(dto.name, dto.ownerEmail, dto.ownerName, dto.adminKey);
   }
 
   @Get('me')

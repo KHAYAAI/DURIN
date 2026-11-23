@@ -1,3 +1,5 @@
+> **Historical.** This describes the original scaffold. Several claims here were corrected or superseded; see [STATUS.md](STATUS.md).
+
 # M4 Conversion (Sandbox) — Status
 
 **Status:** Implemented (sandbox). Live ZAR↔USDC remains **awaiting regulatory approval (G1)**.

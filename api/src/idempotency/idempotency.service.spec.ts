@@ -1,17 +1,23 @@
-import { describe, it, expect } from 'vitest';
-import { createHash } from 'crypto';
+import { describe, expect, it } from 'vitest';
+import { IdempotencyService } from './idempotency.service';
 
-describe('Idempotency request hash', () => {
-  it('is stable for same method/path/body', () => {
-    const hash = (method: string, path: string, body: unknown) =>
-      createHash('sha256')
-        .update(JSON.stringify({ method, path, body: body ?? null }))
-        .digest('hex');
+// Behavioural tests against a real database live in test/idempotency.int.spec.ts.
+describe('IdempotencyService.hashRequest', () => {
+  const service = new IdempotencyService(undefined as never);
 
-    const a = hash('POST', '/v1/conversions', { quote_id: 'q1' });
-    const b = hash('POST', '/v1/conversions', { quote_id: 'q1' });
-    const c = hash('POST', '/v1/conversions', { quote_id: 'q2' });
-    expect(a).toBe(b);
-    expect(a).not.toBe(c);
+  it('is stable for the same method, URL and body', () => {
+    const a = service.hashRequest('POST', '/v1/conversions', { quote_id: 'q1' });
+    expect(service.hashRequest('POST', '/v1/conversions', { quote_id: 'q1' })).toBe(a);
+  });
+
+  it('differs when the body, URL or method differs', () => {
+    const base = service.hashRequest('POST', '/v1/payment_intents/a/cancel', { x: 1 });
+    expect(service.hashRequest('POST', '/v1/payment_intents/a/cancel', { x: 2 })).not.toBe(base);
+    expect(service.hashRequest('POST', '/v1/payment_intents/b/cancel', { x: 1 })).not.toBe(base);
+    expect(service.hashRequest('DELETE', '/v1/payment_intents/a/cancel', { x: 1 })).not.toBe(base);
+  });
+
+  it('treats a missing body as null', () => {
+    expect(service.hashRequest('POST', '/v1/x', undefined)).toBe(service.hashRequest('POST', '/v1/x', null));
   });
 });

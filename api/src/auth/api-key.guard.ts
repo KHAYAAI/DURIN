@@ -9,7 +9,8 @@ import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service';
 import { REQUEST_CONTEXT_KEY, RequestContext } from '../common/request-context';
 import { SCOPES_KEY } from './scopes.decorator';
-import { verifyApiKey } from '../common/crypto-keys';
+import { keyPrefixOf, verifyApiKey } from '../common/crypto-keys';
+import { isSandboxMode } from '../common/sandbox';
 
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
@@ -27,11 +28,13 @@ export class ApiKeyGuard implements CanActivate {
     }
 
     const rawKey = authHeader.slice('Bearer '.length).trim();
-    if (!rawKey.startsWith('dk_')) {
-      throw new UnauthorizedException('Invalid API key format');
+    // Environment separation: test keys only work in sandbox mode, live keys only outside it.
+    const expectedPrefix = isSandboxMode() ? 'dk_test_' : 'dk_live_';
+    if (!rawKey.startsWith(expectedPrefix) || rawKey.length > 128) {
+      throw new UnauthorizedException('Invalid API key');
     }
 
-    const prefix = rawKey.slice(0, 12);
+    const prefix = keyPrefixOf(rawKey);
     const candidates = await this.prisma.apiKey.findMany({
       where: { keyPrefix: prefix, revokedAt: null },
       take: 5,

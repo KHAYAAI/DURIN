@@ -23,7 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </nav>
             <div className="sidebar-footer">
               <span className="badge">Sandbox</span>
-              <span className="muted">M7 dashboard scaffold</span>
+              <span className="muted">simulated money movement</span>
             </div>
           </aside>
           <main className="main">{children}</main>

@@ -1,3 +1,5 @@
+> **Historical.** This describes the original scaffold. Several claims here were corrected or superseded; see [STATUS.md](STATUS.md).
+
 # M1 Developer Platform — Status
 
 **Status:** Implemented (code complete, pending local `pnpm install` + migrate + integration test run)
