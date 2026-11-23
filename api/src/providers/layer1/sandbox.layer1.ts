@@ -20,6 +20,7 @@ export class SandboxLayer1Adapter implements Layer1Port {
   readonly mode = 'sandbox' as const;
 
   private balances = new Map<string, Map<string, string>>(); // walletRef -> asset -> amount
+  private withdrawals = new Map<string, WithdrawalResult>(); // clientReference -> result (provider-side idempotency)
 
   async createWallet(_params: CreateWalletParams): Promise<{ externalRef: string }> {
     const externalRef = `sbx_wallet_${randomBytes(8).toString('hex')}`;
@@ -52,10 +53,13 @@ export class SandboxLayer1Adapter implements Layer1Port {
   }
 
   async getCustodyBalances(organisationId: string) {
-    return sandboxCustody.assets(organisationId).filter((a) => a !== 'ZAR' && a !== 'USD').map((assetCode) => ({ assetCode, available: sandboxCustody.get(organisationId, assetCode) }));
+    return { asOf: new Date(), balances: sandboxCustody.assets(organisationId).filter((a) => a !== 'ZAR' && a !== 'USD').map((assetCode) => ({ assetCode, available: sandboxCustody.get(organisationId, assetCode) })) };
   }
 
   async requestWithdrawal(params: WithdrawalParams): Promise<WithdrawalResult> {
+    const dedupeKey = params.clientReference ? `${params.organisationId ?? ''}:${params.clientReference}` : undefined;
+    const prior = dedupeKey ? this.withdrawals.get(dedupeKey) : undefined;
+    if (prior) return prior;
     const map = this.balances.get(params.walletExternalRef) ?? new Map();
     const current = map.get(params.assetCode.toUpperCase()) ?? '0';
     // In pure sandbox we still "submit" when the simulated balance is short; the platform
@@ -66,11 +70,13 @@ export class SandboxLayer1Adapter implements Layer1Port {
     map.set(params.assetCode.toUpperCase(), next);
     this.balances.set(params.walletExternalRef, map);
 
-    return {
+    const result: WithdrawalResult = {
       providerRef: `sbx_wd_${randomBytes(6).toString('hex')}`,
       status: 'confirmed',
       txHash,
     };
+    if (dedupeKey) this.withdrawals.set(dedupeKey, result);
+    return result;
   }
 
   async simulateDeposit(_params: {

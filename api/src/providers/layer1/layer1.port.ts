@@ -1,3 +1,5 @@
+import type { CustodySnapshot } from '../custody-snapshot';
+
 /**
  * Layer 1 port — custody / wallet provider abstraction.
  * DURIN never holds private keys. All signing/custody is delegated.
@@ -53,7 +55,7 @@ export interface Layer1Port {
   createDepositAddress(params: CreateAddressParams): Promise<DepositAddressResult>;
   getBalances(walletExternalRef: string): Promise<AssetBalance[]>;
   /** What the custodian itself reports holding for this organisation's customers (used by reconciliation). */
-  getCustodyBalances(organisationId: string): Promise<Array<{ assetCode: string; available: string }>>;
+  getCustodyBalances(organisationId: string): Promise<CustodySnapshot>;
   requestWithdrawal(params: WithdrawalParams): Promise<WithdrawalResult>;
   /** Sandbox helper: simulate an inbound deposit detection */
   simulateDeposit?(params: {

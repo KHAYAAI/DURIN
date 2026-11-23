@@ -45,12 +45,17 @@ export class ApiKeyGuard implements CanActivate {
     const prefix = keyPrefixOf(rawKey);
     const candidates = await this.prisma.apiKey.findMany({
       where: { keyPrefix: prefix, revokedAt: null },
+      include: { organisation: { select: { status: true } } },
       take: 5,
     });
 
     const match = candidates.find((k) => verifyApiKey(rawKey, k.keyHash));
     if (!match) {
       throw new UnauthorizedException('Invalid API key');
+    }
+
+    if (match.organisation.status !== 'active') {
+      throw new UnauthorizedException('Organisation is not active');
     }
 
     if (match.expiresAt && match.expiresAt < new Date()) {

@@ -1,3 +1,5 @@
+import type { CustodySnapshot } from '../custody-snapshot';
+
 /**
  * Layer 2 port — regulated fiat / FORGE Mutual bank interface.
  * DURIN never holds customer fiat deposits; it instructs Layer 2.
@@ -42,5 +44,5 @@ export interface Layer2Port {
   initiatePayout(params: FiatPayoutParams): Promise<FiatPayoutResult>;
 
   /** What the regulated Layer 2 entity reports holding for this organisation's customers. */
-  getCustodyBalances(organisationId: string): Promise<Array<{ assetCode: string; available: string }>>;
+  getCustodyBalances(organisationId: string): Promise<CustodySnapshot>;
 }

@@ -40,6 +40,6 @@ export class SandboxLayer2Adapter implements Layer2Port {
   }
 
   async getCustodyBalances(organisationId: string) {
-    return sandboxCustody.assets(organisationId).filter((a) => a === 'ZAR' || a === 'USD').map((assetCode) => ({ assetCode, available: sandboxCustody.get(organisationId, assetCode) }));
+    return { asOf: new Date(), balances: sandboxCustody.assets(organisationId).filter((a) => a === 'ZAR' || a === 'USD').map((assetCode) => ({ assetCode, available: sandboxCustody.get(organisationId, assetCode) })) };
   }
 }

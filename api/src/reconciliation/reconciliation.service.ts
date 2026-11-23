@@ -45,8 +45,10 @@ export class ReconciliationService {
     const reported: Record<string, Reported | Error> = {};
     for (const [name, port] of [['layer1', this.layer1], ['layer2', this.layer2]] as const) {
       try {
-        const rows = await port.getCustodyBalances(organisationId);
-        reported[name] = new Map(rows.map((r) => [r.assetCode.toUpperCase(), r.available]));
+        const snap = await port.getCustodyBalances(organisationId);
+        const maxAge = Number(process.env.RECONCILIATION_MAX_STALENESS_SECONDS ?? 300) * 1000;
+        if (Date.now() - snap.asOf.getTime() > maxAge) throw new Error(`custodian snapshot is stale (as of ${snap.asOf.toISOString()})`);
+        reported[name] = new Map(snap.balances.map((r) => [r.assetCode.toUpperCase(), r.available]));
       } catch (e) {
         reported[name] = e instanceof Error ? e : new Error('custody query failed');
       }
