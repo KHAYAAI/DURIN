@@ -229,6 +229,13 @@ export class ConversionsService {
       return this.serializeConversion(await this.releaseAndFail(conv, accounts, lookup.reason ?? 'LP_REJECTED'));
     }
     if (manual === 'not_executed' && lookup.status === 'not_found') {
+      // A provider may not list a just-submitted order yet. Releasing funds too early could let a
+      // late fill double-spend them, so require a cooling-off period since the call was sent.
+      const minAgeMs = Number(process.env.RESOLVE_NOT_EXECUTED_MIN_AGE_MINUTES ?? 15) * 60_000;
+      const call = await this.prisma.providerCall.findFirst({ where: { provider: this.liquidity.name, operation: 'liquidity.execute', clientReference: conv.id } });
+      if (!call || Date.now() - call.createdAt.getTime() < minAgeMs) {
+        throw new ForbiddenException({ code: 'COOLING_OFF', message: `Not-executed confirmation is only accepted ${minAgeMs / 60_000} minutes after the order was sent.` });
+      }
       // Operator asserts (after checking with the provider) that the order never executed.
       await this.markCall(conv, 'failed', 'operator: confirmed not executed');
       return this.serializeConversion(await this.releaseAndFail(conv, accounts, 'LP_NOT_EXECUTED'));

@@ -41,6 +41,7 @@ export function client(t: TestApp, key?: string) {
   return {
     get: (path: string) => withAuth(request(t.server).get(path)),
     post: (path: string, body?: object, idem?: string) => withAuth(request(t.server).post(path).send(body ?? {}), idem),
+    put: (path: string, body?: object, headers?: Record<string, string>) => { const r = withAuth(request(t.server).put(path).send(body ?? {})); for (const [k, v] of Object.entries(headers ?? {})) r.set(k, v); return r; },
     del: (path: string) => withAuth(request(t.server).delete(path)),
   };
 }

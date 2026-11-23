@@ -532,3 +532,13 @@ describe('input hardening', () => {
     expect(JSON.stringify(res.body)).not.toMatch(/prisma|postgres|column|invalid input syntax|stack/i);
   });
 });
+
+describe('secret-bearing responses are never persisted for idempotent replay', () => {
+  it('API key secrets are not stored in the idempotency table', async () => {
+    const { key, orgId } = await bootstrapOrg(t, 'Secret Idem Org');
+    const res = await client(t, key).post('/v1/api_keys', { name: 'idem', scopes: ['organisations:read'] }, 'idem-secret-1');
+    expect(res.status).toBe(201);
+    const stored = await prisma.idempotencyRecord.findMany({ where: { organisationId: orgId } });
+    expect(JSON.stringify(stored)).not.toContain(res.body.secret);
+  });
+});

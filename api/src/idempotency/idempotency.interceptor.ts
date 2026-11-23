@@ -13,6 +13,12 @@ import { REQUEST_CONTEXT_KEY, RequestContext } from '../common/request-context';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
+ * Responses that contain one-time secrets (API key secrets, webhook signing secrets, TOTP secrets)
+ * must never be persisted for replay, so idempotency is not applied to these routes.
+ */
+const SECRET_BEARING = [/\/api_keys\/?$/, /\/webhook_endpoints\/?$/, /\/webhook_endpoints\/[^/]+\/rotate_secret\/?$/, /\/auth\/mfa\/enroll\/?$/];
+
+/**
  * Applies idempotency to authenticated, mutating requests that carry an `Idempotency-Key`.
  * The response is persisted BEFORE it is sent, so a client that retries immediately after
  * receiving a response always gets a replay, never an "in progress" conflict.
@@ -33,6 +39,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const key: string | undefined = request.headers['idempotency-key'];
     const ctx = request[REQUEST_CONTEXT_KEY] as RequestContext | undefined;
     if (!key || !ctx) return next.handle();
+    if (SECRET_BEARING.some((re) => re.test(String(request.originalUrl ?? request.url).split('?')[0]))) return next.handle();
     if (key.length > 255) {
       throw new BadRequestException({ code: 'INVALID_IDEMPOTENCY_KEY', message: 'Idempotency-Key must be at most 255 characters' });
     }

@@ -90,4 +90,11 @@ describe('Didit KYC/KYB', () => {
     expect((await deliver(event('nope', 'nope', 'Approved', 'evt-unknown-1'))).body.result).toBe('unknown');
     expect((await deliver({ ...event('s', 'v', 'Approved', 'evt-x'), webhook_type: 'data.updated' })).body.result).toBe('ignored');
   });
+
+  it('accepts a large signed decision payload (>100kb) on this route only', async () => {
+    const big = { ...event('nope', 'nope', 'Approved', 'evt-big-1'), decision: { blob: 'x'.repeat(300_000) } };
+    expect((await deliver(big)).status).toBe(200);
+    const res = await request(t.server).post('/v1/api_keys').set('Authorization', 'Bearer dk_test_x').send({ name: 'x'.repeat(300_000) });
+    expect(res.status).toBe(413);
+  });
 });

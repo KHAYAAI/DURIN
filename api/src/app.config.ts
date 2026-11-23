@@ -1,10 +1,20 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { json } from 'express';
 import { recordRequest } from './metrics/http-metrics';
 
 /** Shared by main.ts and the integration tests so both run the exact same HTTP configuration. */
 export function configureApp(app: NestExpressApplication): void {
   app.disable('x-powered-by');
+  // Provider webhooks (Didit decisions) can exceed Express's 100kb default. Raise the cap for that
+  // ONE route only; the rest of the API keeps the small default.
+  // NOTE: wrapped in a differently named function on purpose. Nest decides whether its own global
+  // body parsers are already installed by looking for a middleware literally named `jsonParser`;
+  // mounting body-parser's function directly would silently disable body parsing everywhere else.
+  const largeJson = json({ limit: '1mb' });
+  app.use(`/${process.env.API_PREFIX || 'v1'}/webhooks/didit`, function webhookJsonLimit(req: never, res: never, next: never) {
+    (largeJson as unknown as (a: unknown, b: unknown, c: unknown) => void)(req, res, next);
+  });
   const trustProxy = process.env.TRUST_PROXY;
   if (trustProxy) app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy);
 

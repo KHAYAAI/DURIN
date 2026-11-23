@@ -32,6 +32,7 @@
     "@workos-inc/node": "^12.4.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "express": "^4.22.1",
     "jose": "^6.2.18",
     "prisma": "^6.1.0",
     "reflect-metadata": "^0.2.2",

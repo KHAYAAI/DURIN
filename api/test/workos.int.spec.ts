@@ -157,4 +157,18 @@ describe('MFA step-up (session-bound)', () => {
     expect(res.body.link).toContain('org=org_WORKOS1');
     expect((await client(t, tk).post('/v1/auth/sso/portal-link', { intent: 'bogus' })).status).toBe(400);
   });
+
+  it('linking a WorkOS organization is an operator action (bootstrap token), not a tenant action', async () => {
+    const other = await bootstrapOrg(t, 'Squatter');
+    process.env.BOOTSTRAP_TOKEN = 'b'.repeat(32);
+    try {
+      const noToken = await client(t, other.key).put('/v1/auth/workos/organisation', { workosOrganizationId: 'org_VICTIM' });
+      expect(noToken.status).toBe(403);
+      // Dashboard users can never use it, even admins.
+      const adminUser = await token({ sub: 'user_admin_link', sid: 's_link' });
+      expect((await client(t, adminUser).put('/v1/auth/workos/organisation', { workosOrganizationId: 'org_VICTIM' })).status).toBe(403);
+    } finally {
+      delete process.env.BOOTSTRAP_TOKEN;
+    }
+  });
 });

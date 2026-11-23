@@ -14,6 +14,7 @@ class CountingLp extends SandboxLiquidityAdapter {
   }
 }
 
+process.env.RESOLVE_NOT_EXECUTED_MIN_AGE_MINUTES = '0';
 let t: TestApp;
 let prisma: PrismaService;
 let ledger: LedgerService;
@@ -104,6 +105,20 @@ describe('conversion state machine (custody-reference ledger)', () => {
     expect(done.body).toMatchObject({ status: 'failed', failureReason: 'LP_NOT_EXECUTED' });
     expect(await bal(orgId, 'CONV-INTRANSIT-ZAR')).toBe('0');
     expect(await bal(orgId, 'CUST-LIAB-ZAR')).toBe('1500');
+  });
+
+  it('refuses a not-executed confirmation during the cooling-off period', async () => {
+    const { key } = await bootstrapOrg(t, 'Cooling Org');
+    lp.injectFault('throw_before');
+    const { res } = await quoteAndAccept(key, '1200');
+    process.env.RESOLVE_NOT_EXECUTED_MIN_AGE_MINUTES = '15';
+    try {
+      const early = await client(t, key).post(`/v1/conversions/${res.body.id}/resolve`, { confirmNotExecuted: true });
+      expect(early.status).toBe(403);
+      expect(JSON.stringify(early.body)).toContain('COOLING_OFF');
+    } finally {
+      process.env.RESOLVE_NOT_EXECUTED_MIN_AGE_MINUTES = '0';
+    }
   });
 
   it('resolve requires the dedicated scope', async () => {

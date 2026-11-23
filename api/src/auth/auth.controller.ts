@@ -1,4 +1,5 @@
-import { Body, Controller, ForbiddenException, Get, NotFoundException, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Headers, NotFoundException, Post, Put, UseGuards } from '@nestjs/common';
+import { assertBootstrapAllowed } from '../common/bootstrap';
 import { IsIn, IsOptional, IsString, IsUrl, Length, Matches } from 'class-validator';
 import { ApiKeyGuard } from './api-key.guard';
 import { CurrentOrg } from './current-org.decorator';
@@ -83,13 +84,18 @@ export class AuthController {
     return { link, note: 'Single-use, short-lived link. Do not store or share.' };
   }
 
-  /** Links a DURIN organisation to its WorkOS organization (API key with admin scope). */
+  /**
+   * Links a DURIN organisation to its WorkOS organization. OPERATOR action: needs an admin API key
+   * AND the bootstrap token, so a tenant cannot claim (squat) a WorkOS organization id that belongs
+   * to someone else and thereby route that organisation's users into its own tenant.
+   */
   @Put('workos/organisation')
   @RequireScopes(SCOPES.ADMIN)
-  @RequireMfa()
-  async linkOrganisation(@CurrentOrg() ctx: RequestContext, @Body() dto: LinkOrgDto) {
+  async linkOrganisation(@CurrentOrg() ctx: RequestContext, @Body() dto: LinkOrgDto, @Headers('x-bootstrap-token') bootstrapToken?: string) {
+    if (ctx.authMethod !== 'api_key') throw new ForbiddenException('Linking is an operator action performed with an API key');
+    assertBootstrapAllowed(bootstrapToken);
     await this.prisma.organisation.update({ where: { id: ctx.organisationId }, data: { workosOrganizationId: dto.workosOrganizationId } });
-    await this.prisma.auditLog.create({ data: { organisationId: ctx.organisationId, actorType: ctx.authMethod === 'workos' ? 'user' : 'api_key', actorId: ctx.apiKeyId, action: 'organisation.workos_linked', resourceType: 'organisation', resourceId: ctx.organisationId } });
+    await this.prisma.auditLog.create({ data: { organisationId: ctx.organisationId, actorType: 'api_key', actorId: ctx.apiKeyId, action: 'organisation.workos_linked', resourceType: 'organisation', resourceId: ctx.organisationId } });
     return { organisationId: ctx.organisationId, workosOrganizationId: dto.workosOrganizationId };
   }
 }
