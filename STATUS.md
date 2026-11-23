@@ -86,3 +86,8 @@ payment intents, quotes/conversions, simulated screening and KYB approval) retur
 - **API-key verification uses scrypt on every request** (safe, but costs CPU; add a short-lived verified-key cache before high traffic).
 - Single-region, single-database; no backup/restore or disaster-recovery procedure has been tested.
 - Regulatory gate **G1** (live ZAR↔USDC) remains open and needs external counsel.
+
+
+## Update: custody-reference ledger, Didit, WorkOS
+See `PRODUCTION_READINESS.md` (built vs. external prerequisites) and `CHAIN_STRATEGY.md`.
+Still **not production-ready**: no live adapters, gate G1 closed, Didit/WorkOS accounts not configured by this repo.

@@ -19,7 +19,7 @@
     "build:packages": "pnpm --filter @durin/shared --filter @durin/ledger run build"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.11"
   },
   "packageManager": "pnpm@10.28.0"
 }

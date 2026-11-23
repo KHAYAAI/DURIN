@@ -106,7 +106,10 @@ importers:
     dependencies:
       '@workos-inc/authkit-nextjs':
         specifier: ^4.6.3
-        version: 4.6.3(@workos-inc/node@12.4.0)(next@14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+        version: 4.6.3(@workos-inc/node@9.3.1)(next@14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
+      '@workos-inc/node':
+        specifier: ^9.3.1
+        version: 9.3.1
       next:
         specifier: ^14.2.18
         version: 14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -1081,6 +1084,10 @@ packages:
     resolution: {integrity: sha512-bFpXWRTc4HR3uRaaB1mZiq5tl7aR4MVaao45b4GxEfgK8aLEjHI01oPStn7AjW7iQt8S6vSO2igFBF/MkPhyRg==}
     engines: {node: '>=22.11.0'}
 
+  '@workos-inc/node@9.3.1':
+    resolution: {integrity: sha512-z6+V5lPAdEtJ2IklAsOUJWv5guihkMbtC8WHmLCKOJYLa/H0j9bRj/OmxTs7T+bzL2dhItxPRarhxlAAq/0jgQ==}
+    engines: {node: '>=22.11.0'}
+
   '@xtuc/ieee754@1.2.0':
     resolution: {integrity: sha512-DX8nKgqcGwsc0eJSqYt5lwP4DH5FlHnmuWWBRy7X0NcaGR0ZtuyeESgMwTYVEtxmsNGY+qit4QYT/MIYTOTPeA==}
 
@@ -1667,6 +1674,9 @@ packages:
   etag@1.8.1:
     resolution: {integrity: sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg==}
     engines: {node: '>= 0.6'}
+
+  eventemitter3@5.0.4:
+    resolution: {integrity: sha512-mlsTRyGaPBjPedk6Bvw+aqbsXDtoAyAzm5MO7JgU+yVRyMQ5O8bD4Kcci7BS85f93veegeCPkL8R4GLClnjLFw==}
 
   events@3.3.0:
     resolution: {integrity: sha512-mQw+2fkQbALzQ7V0MY0IqdnXNOeTtP4r0lN9z7AAawCXgqea7bDii20AYrIBrFd/Hx0M2Ocz6S111CaFkUcb0Q==}
@@ -3907,10 +3917,10 @@ snapshots:
       '@webassemblyjs/ast': 1.14.1
       '@xtuc/long': 4.2.2
 
-  '@workos-inc/authkit-nextjs@4.6.3(@workos-inc/node@12.4.0)(next@14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
+  '@workos-inc/authkit-nextjs@4.6.3(@workos-inc/node@9.3.1)(next@14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)':
     dependencies:
       '@sindresorhus/fnv1a': 3.1.0
-      '@workos-inc/node': 12.4.0
+      '@workos-inc/node': 9.3.1
       iron-session: 8.0.4
       jose: 5.10.0
       next: 14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -3923,6 +3933,10 @@ snapshots:
       - typescript
 
   '@workos-inc/node@12.4.0': {}
+
+  '@workos-inc/node@9.3.1':
+    dependencies:
+      eventemitter3: 5.0.4
 
   '@xtuc/ieee754@1.2.0': {}
 
@@ -4499,6 +4513,8 @@ snapshots:
   esutils@2.0.3: {}
 
   etag@1.8.1: {}
+
+  eventemitter3@5.0.4: {}
 
   events@3.3.0: {}
 

@@ -395,6 +395,108 @@ paths:
       summary: Re-derive every balance from posted entries and check every journal balances (admin scope)
       responses:
         '200': { description: "`healthy: true` when no drift and no unbalanced journals" }
+  /conversions/{id}/resolve:
+    post:
+      tags: [Conversions]
+      summary: Resolve a conversion whose liquidity-provider outcome is unknown (scope conversions:resolve; MFA for dashboard users)
+      description: Asks the provider for the order's state. Never re-sends the order. `confirmNotExecuted` lets an operator release the reservation only when the provider reports no such order.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { confirmNotExecuted: { type: boolean } } }
+      responses:
+        '201': { description: Conversion (settled, failed, or still unresolved with providerStatus) }
+  /reconciliation/runs:
+    post:
+      tags: [Reconciliation]
+      summary: Compare the ledger's custody-reference accounts with custodian-reported balances (scope reconciliation:write)
+      responses:
+        '201': { description: "Run with `status` clean|breaks, `source` simulated|live, and any breaks" }
+  /reconciliation/runs/latest:
+    get:
+      tags: [Reconciliation]
+      summary: Latest reconciliation run (scope reconciliation:read)
+      responses:
+        '200': { description: Run or null }
+  /reconciliation/breaks:
+    get:
+      tags: [Reconciliation]
+      summary: List breaks, optionally filtered by status=open|acknowledged
+      responses:
+        '200': { description: OK }
+  /reconciliation/breaks/{id}/acknowledge:
+    post:
+      tags: [Reconciliation]
+      summary: Acknowledge a break (never changes a balance; MFA for dashboard users)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '201': { description: Acknowledged }
+        '404': { description: No such open break }
+  /webhooks/didit:
+    post:
+      tags: [Compliance]
+      summary: Didit verification webhook receiver (not API-key authenticated)
+      description: Authenticated by the `X-Signature-V2` HMAC over canonical JSON and a 300 s `X-Timestamp` window. Deduplicated by `event_id`.
+      security: []
+      responses:
+        '200': { description: "`result`: applied, duplicate, unknown or ignored" }
+        '401': { description: Invalid signature or stale timestamp }
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: The calling principal (API key or WorkOS user), its scopes and MFA state
+      responses:
+        '200': { description: OK }
+  /auth/mfa/status:
+    get:
+      tags: [Auth]
+      summary: Whether this user session holds a valid TOTP step-up (WorkOS users only)
+      responses:
+        '200': { description: OK }
+  /auth/mfa/enroll:
+    post:
+      tags: [Auth]
+      summary: Enroll a TOTP authenticator for the signed-in user (secret shown once)
+      responses:
+        '201': { description: Factor id, secret and otpauth URI }
+  /auth/mfa/challenge:
+    post:
+      tags: [Auth]
+      summary: Start a TOTP challenge bound to this session
+      responses:
+        '201': { description: "`challengeId`, `expiresAt`" }
+  /auth/mfa/verify:
+    post:
+      tags: [Auth]
+      summary: Complete a challenge; 5 attempts max, single use
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [challengeId, code], properties: { challengeId: { type: string }, code: { type: string, pattern: '^\\d{6}$' } } }
+      responses:
+        '201': { description: Verified until `expiresAt` }
+        '403': { description: Invalid code or challenge }
+  /auth/sso/portal-link:
+    post:
+      tags: [Auth]
+      summary: One-time WorkOS Admin Portal link to configure SAML/OIDC SSO (admin + MFA)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [intent], properties: { intent: { type: string, enum: [sso, dsync] }, returnUrl: { type: string } } }
+      responses:
+        '201': { description: Link }
+  /auth/workos/organisation:
+    put:
+      tags: [Auth]
+      summary: Link this organisation to its WorkOS organization (admin + MFA)
+      responses:
+        '200': { description: Linked }
   /version:
     get:
       tags: [Meta]

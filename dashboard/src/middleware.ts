@@ -1,56 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
 
 /**
- * Access gate for the whole dashboard (HTTP Basic). The dashboard renders an organisation's
- * ledger using a server-held API key, so it must never be reachable anonymously.
- *
- *  - DASHBOARD_PASSWORD set     -> credentials required (user: DASHBOARD_USER, default "admin")
- *  - not set, production        -> fail closed (503)
- *  - not set, development       -> open, for local use only
- *
- * This is an interim gate. It is NOT the SSO + MFA login the dashboard auth policy calls for;
- * serve it over HTTPS only and put it behind your identity provider / VPN until that exists.
+ * Every page requires a WorkOS AuthKit session (SSO or password, MFA per the WorkOS environment).
+ * The dashboard renders an organisation's ledger, so it must never be reachable anonymously:
+ *  - WorkOS configured            -> sign-in required for everything except /callback
+ *  - not configured, production   -> fail closed (503)
+ *  - not configured, development  -> open, local use only (uses DURIN_API_KEY)
  */
-async function digest(value: string): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
-}
+const configured = Boolean(
+  process.env.WORKOS_API_KEY &&
+    process.env.WORKOS_CLIENT_ID &&
+    (process.env.WORKOS_COOKIE_PASSWORD ?? '').length >= 32 &&
+    process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI,
+);
 
-function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
-  return diff === 0;
-}
+const guarded = configured
+  ? authkitMiddleware({
+      middlewareAuth: { enabled: true, unauthenticatedPaths: ['/callback'] },
+      redirectUri: process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI,
+    })
+  : null;
 
-export async function middleware(req: NextRequest) {
-  const password = process.env.DASHBOARD_PASSWORD;
-  if (!password) {
-    if (process.env.NODE_ENV === 'production') {
-      return new NextResponse('Dashboard is not configured: set DASHBOARD_PASSWORD.', { status: 503 });
-    }
-    return NextResponse.next();
+export default async function middleware(req: NextRequest, ...rest: unknown[]) {
+  if (guarded) return (guarded as unknown as (r: NextRequest, ...a: unknown[]) => Promise<NextResponse>)(req, ...rest);
+  if (process.env.NODE_ENV === 'production') {
+    return new NextResponse('Dashboard is not configured: set the WORKOS_* environment variables.', { status: 503 });
   }
-
-  const header = req.headers.get('authorization') ?? '';
-  if (header.startsWith('Basic ')) {
-    try {
-      const decoded = atob(header.slice(6));
-      const split = decoded.indexOf(':');
-      const user = decoded.slice(0, split);
-      const pass = decoded.slice(split + 1);
-      const [userOk, passOk] = await Promise.all([
-        digest(user).then(async (d) => constantTimeEqual(d, await digest(process.env.DASHBOARD_USER || 'admin'))),
-        digest(pass).then(async (d) => constantTimeEqual(d, await digest(password))),
-      ]);
-      if (userOk && passOk) return NextResponse.next();
-    } catch {
-      /* fall through to 401 */
-    }
-  }
-  return new NextResponse('Authentication required', {
-    status: 401,
-    headers: { 'WWW-Authenticate': 'Basic realm="DURIN dashboard", charset="UTF-8"' },
-  });
+  return NextResponse.next();
 }
 
 export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'] };

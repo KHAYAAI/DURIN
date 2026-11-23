@@ -1,29 +1,27 @@
 #!/usr/bin/env node
 /**
- * Offline reconciliation helper — compares exported ledger balances to provider snapshots.
- * Usage: node scripts/reconcile-ledger.mjs ledger.json provider.json
- * Both files: [{ accountId|address, assetCode, available: "0.00" }]
+ * Runs DURIN's reconciliation for the organisation that owns the API key and exits non-zero on
+ * any break. Replaces the earlier float-based offline comparison: all arithmetic is done by the
+ * API in exact decimals, against the custodians' reported balances.
+ *
+ *   DURIN_API_URL=https://api.example.com/v1 DURIN_API_KEY=dk_live_... node scripts/reconcile-ledger.mjs
+ *
+ * Needs scopes reconciliation:write and ledger integrity (admin).
  */
-import { readFileSync } from 'fs';
-
-const [ledgerPath, providerPath] = process.argv.slice(2);
-if (!ledgerPath || !providerPath) {
-  console.error('Usage: node scripts/reconcile-ledger.mjs ledger.json provider.json');
+const base = (process.env.DURIN_API_URL || 'http://localhost:3000/v1').replace(/\/$/, '');
+const key = process.env.DURIN_API_KEY;
+if (!key) {
+  console.error('Set DURIN_API_KEY');
   process.exit(2);
 }
-const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8'));
-const provider = JSON.parse(readFileSync(providerPath, 'utf8'));
-const key = (r) => `${r.assetCode}:${r.accountId || r.address}`;
-const map = new Map(provider.map((r) => [key(r), r]));
-let breaks = 0;
-for (const row of ledger) {
-  const p = map.get(key(row));
-  const lv = Number(row.available);
-  const pv = p ? Number(p.available) : NaN;
-  if (!p || Math.abs(lv - pv) > 1e-8) {
-    console.log('BREAK', key(row), 'ledger=', row.available, 'provider=', p?.available ?? 'MISSING');
-    breaks++;
-  }
+const res = await fetch(`${base}/reconciliation/runs`, { method: 'POST', headers: { Authorization: `Bearer ${key}` } });
+if (!res.ok) {
+  console.error(`Reconciliation request failed: ${res.status}`);
+  process.exit(2);
 }
-console.log(JSON.stringify({ checked: ledger.length, breaks }));
-process.exit(breaks ? 1 : 0);
+const run = await res.json();
+for (const b of run.breaks ?? []) {
+  console.log('BREAK', b.kind, b.assetCode, b.custodian, `ledger=${b.ledgerAmount}`, `reported=${b.reportedAmount ?? 'n/a'}`, `delta=${b.delta ?? 'n/a'}`);
+}
+console.log(JSON.stringify({ status: run.status, source: run.source, breaks: (run.breaks ?? []).length, unresolvedProviderOutcomes: run.summary?.unresolvedProviderOutcomes }));
+process.exit(run.status === 'clean' ? 0 : 1);
