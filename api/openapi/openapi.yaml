@@ -1,0 +1,406 @@
+openapi: 3.1.0
+info:
+  title: DURIN API
+  version: 0.8.0
+  description: |
+    Institutional digital financial infrastructure (FORGE Layer 3).
+    Sandbox by default. Amounts are decimal strings. Idempotency-Key required on financial POSTs.
+  contact:
+    name: DURIN Engineering
+servers:
+  - url: http://localhost:3000/v1
+    description: Local
+  - url: https://api.durin.example/v1
+    description: Production (not active)
+security:
+  - ApiKeyAuth: []
+tags:
+  - name: Organisations
+  - name: API Keys
+  - name: Ledger
+  - name: Payments
+  - name: Conversions
+  - name: Wallets
+  - name: Compliance
+  - name: Webhooks
+  - name: Meta
+paths:
+  /health:
+    get:
+      tags: [Meta]
+      security: []
+      summary: Liveness
+      responses:
+        '200':
+          description: OK
+  /organisations:
+    post:
+      tags: [Organisations]
+      security: []
+      summary: Bootstrap organisation + first API key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                ownerEmail: { type: string, format: email }
+                ownerName: { type: string }
+      responses:
+        '201':
+          description: Created
+  /organisations/me:
+    get:
+      tags: [Organisations]
+      summary: Current organisation
+      responses:
+        '200': { description: OK }
+  /api_keys:
+    get:
+      tags: [API Keys]
+      summary: List API keys
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [API Keys]
+      summary: Create API key (secret shown once)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                scopes: { type: array, items: { type: string } }
+      responses:
+        '201': { description: Created }
+  /api_keys/{id}:
+    delete:
+      tags: [API Keys]
+      summary: Revoke key
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: Revoked }
+  /accounts:
+    get:
+      tags: [Ledger]
+      summary: List accounts
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Ledger]
+      summary: Create account
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccount'
+      responses:
+        '201': { description: Created }
+  /accounts/{id}:
+    get:
+      tags: [Ledger]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: OK }
+  /accounts/{id}/balances:
+    get:
+      tags: [Ledger]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: OK }
+  /journals:
+    get:
+      tags: [Ledger]
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Ledger]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostJournal'
+      responses:
+        '201': { description: Posted }
+  /journals/{id}:
+    get:
+      tags: [Ledger]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: OK }
+  /payment_intents:
+    get:
+      tags: [Payments]
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Payments]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentIntent'
+      responses:
+        '201': { description: Created }
+  /payment_intents/{id}:
+    get:
+      tags: [Payments]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: OK }
+  /payment_intents/{id}/simulate_confirm:
+    post:
+      tags: [Payments]
+      summary: Sandbox settle
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: Settled }
+  /payment_intents/{id}/cancel:
+    post:
+      tags: [Payments]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: Cancelled }
+  /payment_links:
+    get:
+      tags: [Payments]
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Payments]
+      responses:
+        '201': { description: Created }
+  /quotes:
+    post:
+      tags: [Conversions]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateQuote'
+      responses:
+        '201': { description: Quote }
+  /quotes/{id}:
+    get:
+      tags: [Conversions]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: OK }
+  /conversions:
+    get:
+      tags: [Conversions]
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Conversions]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quoteId]
+              properties:
+                quoteId: { type: string, format: uuid }
+      responses:
+        '201': { description: Conversion }
+  /conversions/{id}:
+    get:
+      tags: [Conversions]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: OK }
+  /wallets:
+    get:
+      tags: [Wallets]
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Wallets]
+      responses:
+        '201': { description: Created }
+  /wallets/{id}:
+    get:
+      tags: [Wallets]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: OK }
+  /wallets/{id}/addresses:
+    post:
+      tags: [Wallets]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '201': { description: Address }
+  /deposit_addresses/{id}/simulate_deposit:
+    post:
+      tags: [Wallets]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: Detected }
+  /withdrawals:
+    get:
+      tags: [Wallets]
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Wallets]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201': { description: Submitted }
+  /withdrawals/{id}:
+    get:
+      tags: [Wallets]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: OK }
+  /compliance/verifications:
+    get:
+      tags: [Compliance]
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Compliance]
+      responses:
+        '201': { description: Started }
+  /compliance/verifications/{id}/simulate_approve:
+    post:
+      tags: [Compliance]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: Approved }
+  /compliance/screenings:
+    post:
+      tags: [Compliance]
+      responses:
+        '201': { description: Result }
+  /compliance/limits:
+    get:
+      tags: [Compliance]
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Compliance]
+      responses:
+        '201': { description: Created }
+  /compliance/approvals:
+    get:
+      tags: [Compliance]
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Compliance]
+      responses:
+        '201': { description: Requested }
+  /compliance/approvals/{id}/decide:
+    post:
+      tags: [Compliance]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: Decided }
+  /compliance/audit:
+    get:
+      tags: [Compliance]
+      responses:
+        '200': { description: OK }
+  /webhook_endpoints:
+    get:
+      tags: [Webhooks]
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Webhooks]
+      responses:
+        '201': { description: Created }
+  /webhook_endpoints/{id}:
+    delete:
+      tags: [Webhooks]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: Deleted }
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: dk_test_...
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string }
+  schemas:
+    CreateAccount:
+      type: object
+      required: [code, name, accountType, assetCode]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        accountType: { type: string, enum: [asset, liability, equity, revenue, expense, system] }
+        assetCode: { type: string }
+        allowNegative: { type: boolean }
+    PostJournal:
+      type: object
+      required: [lines]
+      properties:
+        reference: { type: string }
+        description: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [accountId, direction, amount, assetCode]
+            properties:
+              accountId: { type: string, format: uuid }
+              direction: { type: string, enum: [debit, credit] }
+              amount: { type: string, description: Decimal string }
+              assetCode: { type: string }
+    CreatePaymentIntent:
+      type: object
+      required: [amount, assetCode]
+      properties:
+        amount: { type: string }
+        assetCode: { type: string, enum: [USDC, USDT, ZAR] }
+        description: { type: string }
+        customerReference: { type: string }
+    CreateQuote:
+      type: object
+      required: [sourceAsset, targetAsset, sourceAmount]
+      properties:
+        sourceAsset: { type: string, enum: [ZAR, USDC, USDT] }
+        targetAsset: { type: string, enum: [ZAR, USDC, USDT] }
+        sourceAmount: { type: string }
