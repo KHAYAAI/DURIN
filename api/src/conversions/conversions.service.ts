@@ -19,6 +19,7 @@ import { assertSandboxOnly, isSandboxMode } from '../common/sandbox';
 import { assertConversionAllowed } from './live-gate';
 import { LIQUIDITY_PORT } from '../providers/liquidity/liquidity.module';
 import { LiquidityPort } from '../providers/liquidity/liquidity.port';
+import { GatesService } from '../compliance/gates.service';
 import { ComplianceService } from '../compliance/compliance.service';
 import { sandboxCustody } from '../providers/sandbox-custody';
 import {
@@ -51,6 +52,7 @@ export class ConversionsService {
     private readonly ledger: LedgerService,
     private readonly webhooks: WebhookDeliveryService,
     private readonly compliance: ComplianceService,
+    private readonly gates: GatesService,
     @Inject(LIQUIDITY_PORT) private readonly liquidity: LiquidityPort,
   ) {}
 
@@ -74,6 +76,7 @@ export class ConversionsService {
       if (this.liquidity.mode === 'live') {
         if (!this.liquidity.getQuote) throw new Error('Liquidity adapter cannot quote');
         await this.compliance.assertOrganisationVerified(organisationId);
+        await this.gates.assertG1(organisationId, [sourceAsset, targetAsset]);
         const q = await this.liquidity.getQuote({ sourceAsset, targetAsset, sourceAmount });
         computed = { ...q, sourceAsset: sourceAsset.toUpperCase(), targetAsset: targetAsset.toUpperCase(), sourceAmount };
       } else {
@@ -131,7 +134,10 @@ export class ConversionsService {
       await this.prisma.quote.updateMany({ where: { id: quote.id, status: 'open' }, data: { status: 'expired' } });
       throw new BadRequestException('Quote has expired');
     }
-    if (this.liquidity.mode === 'live') await this.compliance.assertOrganisationVerified(organisationId);
+    if (this.liquidity.mode === 'live') {
+      await this.compliance.assertOrganisationVerified(organisationId);
+      await this.gates.assertG1(organisationId, [quote.sourceAsset, quote.targetAsset]);
+    }
 
     // Atomically claim the quote: of any number of concurrent accepts, exactly one proceeds.
     const claimed = await this.prisma.quote.updateMany({

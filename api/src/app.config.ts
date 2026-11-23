@@ -1,5 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { recordRequest } from './metrics/http-metrics';
 
 /** Shared by main.ts and the integration tests so both run the exact same HTTP configuration. */
 export function configureApp(app: NestExpressApplication): void {
@@ -8,7 +9,18 @@ export function configureApp(app: NestExpressApplication): void {
   if (trustProxy) app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy);
 
   // Versioned API under /v1; health remains at /health for probes
-  app.setGlobalPrefix(process.env.API_PREFIX || 'v1', { exclude: ['health'] });
+  app.setGlobalPrefix(process.env.API_PREFIX || 'v1', { exclude: ['health', 'metrics'] });
+
+  // Request metrics: route TEMPLATE (never raw URLs/ids) to keep cardinality bounded.
+  app.use((req: { method: string; baseUrl?: string; route?: { path?: string } }, res: { statusCode: number; on(e: string, f: () => void): void }, next: () => void) => {
+    const start = process.hrtime.bigint();
+    res.on('finish', () => {
+      const route = req.route?.path ? `${req.baseUrl ?? ''}${req.route.path}` : 'unmatched';
+      if (route === '/metrics') return;
+      recordRequest(req.method, route, res.statusCode, Number(process.hrtime.bigint() - start) / 1e9);
+    });
+    next();
+  });
 
   app.use((_req: unknown, res: { setHeader(k: string, v: string): void }, next: () => void) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');

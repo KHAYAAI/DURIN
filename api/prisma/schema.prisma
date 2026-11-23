@@ -659,3 +659,23 @@ model MfaVerification {
   @@index([userId, sessionId, expiresAt])
   @@map("mfa_verifications")
 }
+
+/// Gate G1: a human-recorded counsel sign-off that live conversion may operate for an organisation.
+/// DURIN never infers this; it is created through an MFA-protected admin action and is revocable.
+model GateApproval {
+  id               String    @id @default(uuid()) @db.Uuid
+  organisationId   String    @map("organisation_id") @db.Uuid
+  gate             String // 'G1'
+  counselReference String    @map("counsel_reference")
+  documentSha256   String    @map("document_sha256")
+  /// { assets: string[], jurisdictions: string[] } the sign-off covers
+  scope            Json
+  approvedBy       String    @map("approved_by")
+  approvedAt       DateTime  @default(now()) @map("approved_at")
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  revokedBy        String?   @map("revoked_by")
+
+  @@index([organisationId, gate])
+  @@map("gate_approvals")
+}
