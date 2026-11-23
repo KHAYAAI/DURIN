@@ -21,6 +21,7 @@ import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { RateLimitGuard } from './hardening/rate-limit.guard';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { MetricsModule } from './metrics/metrics.module';
+import { ChainsModule } from './chains/chains.module';
 import { MetaModule } from './meta/meta.module';
 import { ProductionSafety } from './hardening/production.guard';
 
@@ -43,6 +44,7 @@ import { ProductionSafety } from './hardening/production.guard';
     Layer1Module,
     LiquidityModule,
     WalletsModule,
+    ChainsModule,
     ComplianceModule,
     Layer2Module,
     ReconciliationModule,

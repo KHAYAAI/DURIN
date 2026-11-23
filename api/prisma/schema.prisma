@@ -679,3 +679,16 @@ model GateApproval {
   @@index([organisationId, gate])
   @@map("gate_approvals")
 }
+
+/// Where the chain watcher has read up to, per deposit address and token account, so each tick
+/// only examines new finalized transactions. Credits are independently idempotent per (address, tx).
+model ChainCursor {
+  id               String   @id @default(uuid()) @db.Uuid
+  depositAddressId String   @map("deposit_address_id") @db.Uuid
+  tokenAccount     String   @map("token_account")
+  lastSignature    String   @map("last_signature")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@unique([depositAddressId, tokenAccount])
+  @@map("chain_cursors")
+}
