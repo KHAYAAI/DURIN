@@ -26,13 +26,17 @@ function snapshotContract(get: () => Promise<{ asOf: Date; balances: Array<{ ass
   });
 }
 
-export function layer1Contract(name: string, make: () => Promise<{ port: Layer1Port; org: string }>) {
+export function layer1Contract(
+  name: string,
+  make: () => Promise<{ port: Layer1Port; org: string }>,
+  opts: { chain: string; destination: string; assetCode?: string } = { chain: 'ethereum-sepolia', destination: '0x00000000000000000000000000000000000000aa' },
+) {
   describe(`Layer1Port contract: ${name}`, () => {
     it('creates wallets and addresses with provider references', async () => {
       const { port, org } = await make();
       const w = await port.createWallet({ organisationId: org });
       expect(w.externalRef).toBeTruthy();
-      const a = await port.createDepositAddress({ walletExternalRef: w.externalRef, assetCode: 'usdc', chain: 'ethereum-sepolia' });
+      const a = await port.createDepositAddress({ walletExternalRef: w.externalRef, assetCode: 'usdc', chain: opts.chain });
       expect(a.address).toBeTruthy();
       expect(a.assetCode).toBe('USDC');
       expect(a.providerRef).toBeTruthy();
@@ -41,7 +45,7 @@ export function layer1Contract(name: string, make: () => Promise<{ port: Layer1P
     it('is idempotent on clientReference: a repeated withdrawal request returns the same provider reference', async () => {
       const { port, org } = await make();
       const w = await port.createWallet({ organisationId: org });
-      const req = { organisationId: org, walletExternalRef: w.externalRef, assetCode: 'USDC', amount: '1', destination: '0x00000000000000000000000000000000000000aa', chain: 'ethereum-sepolia', clientReference: randomUUID() };
+      const req = { organisationId: org, walletExternalRef: w.externalRef, assetCode: opts.assetCode ?? 'USDC', amount: '1', destination: opts.destination, chain: opts.chain, clientReference: randomUUID() };
       const first = await port.requestWithdrawal(req);
       const second = await port.requestWithdrawal(req);
       expect(second.providerRef).toBe(first.providerRef);
