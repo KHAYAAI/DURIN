@@ -56,6 +56,11 @@ groups:
         for: 2m
         labels: { severity: page }
         annotations: { summary: DURIN API is not scrapeable }
+      - alert: DurinDepositWatcherStalled
+        expr: durin_deposit_watcher_age_seconds > 300 or durin_deposit_watcher_age_seconds < 0
+        for: 10m
+        labels: { severity: page }
+        annotations: { summary: "Solana deposit watcher has not completed a clean pass in 5+ minutes (customer deposits are not being credited)", runbook: "ops/RUNBOOK.md#deposit-watcher" }
       - alert: DurinStaleVerifications
         expr: durin_verifications_stale > 0
         for: 1h
