@@ -38,6 +38,10 @@ Because FORGE Mutual (rand) and OpenFireblocks (custody) are not launch-ready, a
 ## Deposit detection (Solana) — built
 OpenFireblocks emits no inbound-deposit event, so DURIN reads the chain itself (`api/src/chains/deposit-watcher.service.ts`). For every active Solana deposit address it lists the owner's SPL token accounts, walks new **finalized** transactions, takes the amount from the token-balance change, and credits through the chain policy exactly once per (address, tx). Wrong/bridged mints are never credited and are audited (`deposit.rejected`). The cursor only advances past processed transactions, so an RPC outage delays deposits but cannot skip one. Enable with `SOLANA_RPC_URL` and `DEPOSIT_WATCHER_INTERVAL_SECONDS`.
 **Not verified:** it has only run against a fake Solana node. Before relying on it: run against devnet with a real deposit; choose a reliable RPC provider with an SLA; confirm transaction shapes (token-balance fields) on mainnet; decide a policy for returning rejected deposits. EVM chains have no watcher.
+## Liquidity strategy (decided 2026-11-23)
+1. Launch with an **external liquidity provider** (shortlist VALR / Yellow Card; not yet chosen or contracted).
+2. **Net opposing flows internally**, hedging only the residual — designed in `NETTING_DESIGN.md`; the calculator is built and tested, **not wired in**, and waits on counsel (it creates a transient principal position unless matching is atomic).
+3. **Small own inventory later**, after counsel, capital and risk limits. Not built.
 
 ## Account configuration performed (non-secret identifiers)
 - **Didit** (organisation A-CARD, **Sandbox** application only; live application untouched): workflows created and published — *DURIN Business KYB* `65a5d74a-6905-4590-971a-e9bd65641b4e` (registry + documents[LEGAL_PRESENCE required] + key people + AML) and *DURIN Account Holder KYC* `be3877e5-9b0d-4fa2-9d68-123c25160f2a` (OCR + passive liveness + face match + AML + IP analysis). **No webhook destination and no API key were created** (needs a public API URL; secrets must not pass through this session).
