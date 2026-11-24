@@ -130,7 +130,7 @@ describe('Solana deposit watcher', () => {
   it('an RPC outage is reported as an error and credits nothing; recovery catches up', async () => {
     const o = await setup('Watch Outage');
     node.txs.push({ sig: `x1-${o.addr.id}`, account: o.acct, mint: USDC, pre: '0', post: '4000000' });
-    const down = new DepositWatcherService(prisma, t.app.get(DepositWatcherService)['wallets'], new SolanaRpc({ url: 'http://127.0.0.1:1' }));
+    const down = new DepositWatcherService(prisma, t.app.get(DepositWatcherService)['wallets'], t.app.get(DepositWatcherService)['rejected'], new SolanaRpc({ url: 'http://127.0.0.1:1' }));
     const r = await down.tick();
     expect(r.errors).toBeGreaterThan(0);
     expect(await bal(o.orgId)).toBe('none');

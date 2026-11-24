@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RejectedDepositsService } from '../compliance/rejected-deposits.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { CHAIN_REGISTRY } from './chain-policy';
 import { SolanaRpc, type ParsedTx } from './solana-rpc';
@@ -42,6 +43,7 @@ export class DepositWatcherService implements OnApplicationBootstrap, OnApplicat
   constructor(
     private readonly prisma: PrismaService,
     private readonly wallets: WalletsService,
+    private readonly rejected: RejectedDepositsService,
     @Optional() @Inject(SOLANA_RPC) private readonly rpcOverride?: SolanaRpc,
   ) {}
 
@@ -111,15 +113,14 @@ export class DepositWatcherService implements OnApplicationBootstrap, OnApplicat
         if (units > 0n) {
           if (acct.mint !== entry.token) {
             // Not this asset's native mint (look-alike, bridged or spam token). Never credited; recorded for ops.
-            await this.prisma.auditLog.create({
-              data: {
-                organisationId: addr.organisationId, actorType: 'system', action: 'deposit.rejected', resourceType: 'deposit_address', resourceId: addr.id,
-                metadata: { reason: 'WRONG_TOKEN', txHash: sig, tokenContract: acct.mint, baseUnits: units.toString(), decimals: this.decimalsOf(tx, acct.pubkey) ?? null },
-              },
+            await this.rejected.record({
+              organisationId: addr.organisationId, depositAddressId: addr.id, chain: addr.chain, txHash: sig, tokenContract: acct.mint,
+              baseUnits: units.toString(), decimals: this.decimalsOf(tx, acct.pubkey) ?? null, reason: 'WRONG_TOKEN', sender: this.senderOf(tx, acct.mint, acct.pubkey),
             });
           } else {
             const result = await this.wallets.recordDetectedDeposit(addr.organisationId, addr.id, {
               txHash: sig, amount: fromUnits(units, entry.decimals), tokenContract: acct.mint, confirmations: entry.confirmations,
+              sender: this.senderOf(tx, acct.mint, acct.pubkey),
             });
             if (result.status === 'credited') credited++;
           }
@@ -148,6 +149,19 @@ export class DepositWatcherService implements OnApplicationBootstrap, OnApplicat
     const pre = BigInt(pick(tx.meta.preTokenBalances)?.uiTokenAmount.amount ?? '0');
     const post = BigInt(pick(tx.meta.postTokenBalances)?.uiTokenAmount.amount ?? '0');
     return post > pre ? post - pre : 0n;
+  }
+
+  /** Owner of the token account whose balance of this mint DECREASED in the transaction (the sender), if unambiguous. */
+  private senderOf(tx: ParsedTx, mint: string, ownTokenAccount: string): string | undefined {
+    const keys = tx.transaction.message.accountKeys.map((k) => (typeof k === 'string' ? k : k.pubkey));
+    const own = keys.indexOf(ownTokenAccount);
+    const pre = tx.meta?.preTokenBalances ?? []; const post = tx.meta?.postTokenBalances ?? [];
+    const senders = pre.filter((b) => b.mint === mint && b.accountIndex !== own && b.owner).filter((b) => {
+      const after = post.find((p) => p.accountIndex === b.accountIndex);
+      return after && BigInt(after.uiTokenAmount.amount) < BigInt(b.uiTokenAmount.amount);
+    });
+    const owners = new Set(senders.map((b) => b.owner as string));
+    return owners.size === 1 ? [...owners][0] : undefined;
   }
 
   private decimalsOf(tx: ParsedTx, tokenAccount: string): number | undefined {
