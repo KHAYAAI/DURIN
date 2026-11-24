@@ -17,17 +17,22 @@ export class GatesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async recordG1(organisationId: string, actor: string, input: { counselReference: string; documentSha256: string; assets: string[]; jurisdictions: string[]; validDays: number }) {
+    return this.record('G1', organisationId, actor, input);
+  }
+
+  /** G1 = live conversion (per customer organisation); G2 = internal netting; G3 = own-inventory dealing (G2/G3 are recorded on the house organisation). */
+  async record(gate: 'G1' | 'G2' | 'G3', organisationId: string, actor: string, input: { counselReference: string; documentSha256: string; assets: string[]; jurisdictions: string[]; validDays: number }) {
     if (!/^[0-9a-f]{64}$/i.test(input.documentSha256)) throw new BadRequestException('documentSha256 must be a 64-character hex SHA-256');
     if (!input.assets.length || !input.jurisdictions.length) throw new BadRequestException('assets and jurisdictions are required');
     if (input.validDays < 1 || input.validDays > 365) throw new BadRequestException('validDays must be between 1 and 365');
     const row = await this.prisma.gateApproval.create({
       data: {
-        organisationId, gate: 'G1', counselReference: input.counselReference, documentSha256: input.documentSha256.toLowerCase(),
+        organisationId, gate, counselReference: input.counselReference, documentSha256: input.documentSha256.toLowerCase(),
         scope: { assets: input.assets.map((a) => a.toUpperCase()), jurisdictions: input.jurisdictions.map((j) => j.toUpperCase()) },
         approvedBy: actor, expiresAt: new Date(Date.now() + input.validDays * 86_400_000),
       },
     });
-    await this.prisma.auditLog.create({ data: { organisationId, actorType: 'user', actorId: actor, action: 'gate.g1_recorded', resourceType: 'gate_approval', resourceId: row.id, metadata: { counselReference: input.counselReference, documentSha256: row.documentSha256 } } });
+    await this.prisma.auditLog.create({ data: { organisationId, actorType: 'user', actorId: actor, action: `gate.${gate.toLowerCase()}_recorded`, resourceType: 'gate_approval', resourceId: row.id, metadata: { counselReference: input.counselReference, documentSha256: row.documentSha256 } } });
     return this.ser(row);
   }
 
@@ -39,9 +44,15 @@ export class GatesService {
     return { id, revoked: true };
   }
 
-  async list(organisationId: string) {
-    const rows = await this.prisma.gateApproval.findMany({ where: { organisationId, gate: 'G1' }, orderBy: { approvedAt: 'desc' }, take: 50 });
+  async list(organisationId: string, gate: 'G1' | 'G2' | 'G3' = 'G1') {
+    const rows = await this.prisma.gateApproval.findMany({ where: { organisationId, gate }, orderBy: { approvedAt: 'desc' }, take: 50 });
     return rows.map((r) => this.ser(r));
+  }
+
+  /** True when a valid, unrevoked, unexpired approval for `gate` covers every given asset (none given = any). */
+  async isOpen(organisationId: string, gate: 'G1' | 'G2' | 'G3', assets: string[] = []): Promise<boolean> {
+    const rows = await this.prisma.gateApproval.findMany({ where: { organisationId, gate, revokedAt: null, expiresAt: { gt: new Date() } } });
+    return rows.some((r) => assets.every((a) => (r.scope as unknown as G1Scope).assets.includes(a.toUpperCase())));
   }
 
   /** Throws unless a valid, unrevoked, unexpired G1 approval covers every asset in the conversion. */

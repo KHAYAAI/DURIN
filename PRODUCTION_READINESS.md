@@ -43,6 +43,15 @@ OpenFireblocks emits no inbound-deposit event, so DURIN reads the chain itself (
 2. **Net opposing flows internally**, hedging only the residual — designed in `NETTING_DESIGN.md`; the calculator is built and tested, **not wired in**, and waits on counsel (it creates a transient principal position unless matching is atomic).
 3. **Small own inventory later**, after counsel, capital and risk limits. Not built.
 
+## The five previously-paused items (built 2026-11-24)
+| Item | State |
+|---|---|
+| **Netting (variant A)** | Built and tested end to end in the sandbox (matching window, house counterparty, residual-only hedge, unwind on rejection, stall + resolve on unknown, reconciliation clean for customers and house). **Closed by gate G2; sandbox-only** — no live custody-transfer adapter. Waits on counsel question 9 |
+| **Own inventory** | Built and tested (capital recording, limits, fallback, unknown-outcome resolve). **Closed by gate G3; sandbox-only.** P&L is visible in `HOUSE-TRADE-ZAR`; no valuation/mark-to-market or loss limits beyond holdings limits yet |
+| **Ethereum** | Deposit watcher built and tested (finalized ERC-20 `Transfer` logs, native USDC only, wrong tokens recorded for return). Custody: VALR supports Ethereum networks; OpenFireblocks' wallet route still sends native ETH only, so **no OpenFireblocks ERC-20 withdrawals** |
+| **Wrong-token returns** | Built: review → screening reference → four-eyes approval → recorded return evidence, all audited. The on-chain return itself is performed out of band by custody operators (custody APIs refuse unregistered tokens) |
+| **Move off A-CARD** | Tooling built (idempotent WorkOS provisioning script + manifest + runbook `MOVE_OFF_ACARD.md`). **The move is not done**: it needs the new accounts, which only you can create |
+
 ## Account configuration performed (non-secret identifiers)
 - **Didit** (organisation A-CARD, **Sandbox** application only; live application untouched): workflows created and published — *DURIN Business KYB* `65a5d74a-6905-4590-971a-e9bd65641b4e` (registry + documents[LEGAL_PRESENCE required] + key people + AML) and *DURIN Account Holder KYC* `be3877e5-9b0d-4fa2-9d68-123c25160f2a` (OCR + passive liveness + face match + AML + IP analysis). **No webhook destination and no API key were created** (needs a public API URL; secrets must not pass through this session).
 - **WorkOS** (A-CARD's Project → **Staging**, client `client_01M079SBRGBJ82933Y70J1KDX2`; production untouched): organisation *DURIN* `org_01M84EDF2A94SVHR4ETQJ8PYRM`; redirect URI `http://localhost:3001/callback`; permissions matching the API scopes (`organisations:read`, `payments:read|write`, `conversions:read|write`, `wallets:read|write`, `ledger:read`, `compliance:read|write`, `reconciliation:read`); roles `durin-viewer`, `durin-operator` (the built-in `admin` role maps to full access). Environment MFA/SSO policy left unchanged.

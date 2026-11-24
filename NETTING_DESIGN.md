@@ -2,7 +2,13 @@
 
 **Decision (owner, 2026-11-23):** (1) launch with an external liquidity provider; (2) net opposing customer flows internally and send only the difference to the provider; (3) add a small own inventory later, once volumes, licensing and risk limits are known.
 
-**Status:** decision recorded; the netting *calculation* is built and tested (`api/src/conversions/netting.ts`). Internal netting is **not wired into conversions** and must not be until counsel answers question 9 in `COUNSEL_BRIEF.md`. Own inventory is not built.
+**Status (2026-11-24):** BUILT and tested in the sandbox, **closed by default**. Variant A (atomic matching window) and own-inventory dealing both run through a platform-owned *house organisation*, behind `HOUSE_DEALING` and human-recorded gate approvals **G2** (netting) and **G3** (inventory) on the house organisation. They cannot run in production: the physical custody transfers between customers and the house have no live adapter. **Do not open G2/G3 before counsel answers question 9 in `COUNSEL_BRIEF.md`.**
+
+### How it works as built
+- House accounts per asset: `CUSTODY-REF` (mirrors custodian balances), `HOUSE-TRADE` (trading clearing: ZAR balance = realised P&L, stablecoin balance = open position), `HOUSE-CAPITAL` (equity). No journal ever touches two tenants: each customer gets the normal fill/settle journals (the house plays the "liquidity provider"), the house gets its own mirror journals.
+- Order inside a batch is fixed: **receive all → hedge the net residual → pay all**. Every step is idempotent (transfer references, journal keys and the provider reference all derive from the conversion/batch id).
+- Failure handling: a definitive refusal before payouts **unwinds the batch** and sends each conversion to the external provider; an **unknown** outcome **stalls** the batch (`providerUnknown`, funds held, alert) and an operator re-drives it with `POST /v1/conversions/{id}/resolve`, which asks the provider before doing anything and honours the cooling-off rule.
+- Inventory mode fills a single conversion from house holdings if inventory and `HOUSE_LIMITS` allow, else falls back to the provider.
 
 ## Why step 2 is not free of step 3's questions
 Customers hold **firm quotes at different rates**. If customer A sells ZAR for USDC and customer B sells USDC for ZAR, A and B will almost never be exactly offsetting in amount or price. Delivering to both *immediately*, and hedging only the difference *later*, means DURIN is the counterparty to both customers for a short time and carries the price and amount mismatch in between. That is a small, temporary **principal position** — the same kind of exposure step 3 makes permanent. Two ways to keep step 2 clean:

@@ -20,7 +20,7 @@ export class OrganisationsController {
   @Post()
   create(@Body() dto: CreateOrganisationDto, @Headers('x-bootstrap-token') bootstrapToken?: string) {
     assertBootstrapAllowed(bootstrapToken);
-    return this.organisations.create(dto.name, dto.ownerEmail, dto.ownerName, dto.adminKey);
+    return this.organisations.create(dto.name, dto.ownerEmail, dto.ownerName, dto.adminKey, dto.house);
   }
 
   @Get('me')

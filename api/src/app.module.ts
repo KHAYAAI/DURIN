@@ -22,6 +22,7 @@ import { RateLimitGuard } from './hardening/rate-limit.guard';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { ChainsModule } from './chains/chains.module';
+import { CustodyTransferModule } from './providers/transfer/custody-transfer.module';
 import { MetaModule } from './meta/meta.module';
 import { ProductionSafety } from './hardening/production.guard';
 
@@ -43,6 +44,7 @@ import { ProductionSafety } from './hardening/production.guard';
     ConversionsModule,
     Layer1Module,
     LiquidityModule,
+    CustodyTransferModule,
     WalletsModule,
     ChainsModule,
     ComplianceModule,

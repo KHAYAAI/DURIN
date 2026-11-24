@@ -39,7 +39,9 @@ export class MetricsController {
         (SELECT count(*) FROM webhook_deliveries WHERE status = 'pending' AND next_attempt_at < now() - interval '5 minutes') AS webhook_backlog,
         (SELECT count(*) FROM webhook_deliveries WHERE status = 'failed') AS webhook_failed,
         (SELECT count(*) FROM withdrawal_requests WHERE status IN ('requested','processing') AND created_at < now() - interval '10 minutes') AS stuck_withdrawals,
-        (SELECT count(*) FROM verification_records WHERE status = 'pending' AND created_at < now() - interval '7 days') AS stale_verifications`;
+        (SELECT count(*) FROM verification_records WHERE status = 'pending' AND created_at < now() - interval '7 days') AS stale_verifications,
+        (SELECT count(*) FROM netting_batches WHERE status = 'stalled') AS stalled_batches,
+        (SELECT count(*) FROM rejected_deposits WHERE status IN ('detected','under_review','approved') AND created_at < now() - interval '3 days') AS aged_rejected_deposits`;
     const g = (name: string, help: string, v: unknown) => `# HELP ${name} ${help}\n# TYPE ${name} gauge\n${name} ${n(v)}`;
     return [
       renderHttpMetrics(),
@@ -53,6 +55,8 @@ export class MetricsController {
       g('durin_withdrawals_stuck', 'Withdrawals requested/processing for > 10m', r?.stuck_withdrawals),
       g('durin_deposit_watcher_age_seconds', 'Seconds since the Solana deposit watcher last completed an error-free pass (-1 = never)', watcherStatus.lastSuccessAt ? Math.floor((Date.now() - watcherStatus.lastSuccessAt) / 1000) : -1),
       g('durin_evm_watcher_age_seconds', 'Seconds since the EVM deposit watcher last completed an error-free pass (-1 = never)', evmWatcherStatus.lastSuccessAt ? Math.floor((Date.now() - evmWatcherStatus.lastSuccessAt) / 1000) : -1),
+      g('durin_netting_batches_stalled', 'Netting batches stalled on an unknown outcome (customer funds held at the house)', r?.stalled_batches),
+      g('durin_rejected_deposits_aged', 'Wrong-token deposits awaiting a decision for > 3 days', r?.aged_rejected_deposits),
       g('durin_verifications_stale', 'KYC/KYB verifications pending > 7d', r?.stale_verifications),
       '',
     ].join('\n');

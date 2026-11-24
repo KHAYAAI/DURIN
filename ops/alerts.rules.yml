@@ -61,6 +61,16 @@ groups:
         for: 10m
         labels: { severity: page }
         annotations: { summary: "Solana deposit watcher has not completed a clean pass in 5+ minutes (customer deposits are not being credited)", runbook: "ops/RUNBOOK.md#deposit-watcher" }
+      - alert: DurinNettingBatchStalled
+        expr: durin_netting_batches_stalled > 0
+        for: 2m
+        labels: { severity: page }
+        annotations: { summary: A netting batch is stalled on an unknown outcome; customer funds are held at the house, runbook: "ops/RUNBOOK.md#netting-batch-stalled" }
+      - alert: DurinRejectedDepositsAged
+        expr: durin_rejected_deposits_aged > 0
+        for: 1h
+        labels: { severity: ticket }
+        annotations: { summary: Wrong-token deposits waiting for a return decision for over 3 days, runbook: "ops/RUNBOOK.md#wrong-token-deposits" }
       - alert: DurinStaleVerifications
         expr: durin_verifications_stale > 0
         for: 1h
