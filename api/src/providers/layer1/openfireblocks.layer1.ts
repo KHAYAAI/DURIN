@@ -26,7 +26,8 @@ const SOLANA_CHAINS = new Set(['solana', 'solana-devnet']);
 const DEFINITIVE_REJECTIONS = new Set([400, 403, 404, 409, 422]);
 const DECIMALS: Record<string, number> = { USDC: 6, USDT: 6, SOL: 9 };
 
-export class ProviderOutcomeUnknown extends Error {}
+export { ProviderOutcomeUnknown } from '../errors';
+import { ProviderOutcomeUnknown } from '../errors';
 
 type Json = Record<string, unknown>;
 

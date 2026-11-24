@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { LiquidityPort } from './liquidity.port';
+import { ValrLiquidityAdapter } from '../valr/valr.liquidity';
 import { SandboxLiquidityAdapter } from './sandbox.liquidity';
 
 export const LIQUIDITY_PORT = Symbol('LIQUIDITY_PORT');
@@ -11,6 +12,7 @@ export const LIQUIDITY_PORT = Symbol('LIQUIDITY_PORT');
       provide: LIQUIDITY_PORT,
       useFactory: (): LiquidityPort => {
         const mode = process.env.LIQUIDITY_ADAPTER || 'sandbox';
+        if (mode === 'valr') return ValrLiquidityAdapter.fromEnv();
         if (mode !== 'sandbox') {
           throw new Error(`LIQUIDITY_ADAPTER=${mode} has no registered adapter. Implement LiquidityPort for your provider.`);
         }

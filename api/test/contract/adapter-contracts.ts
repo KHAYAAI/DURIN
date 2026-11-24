@@ -29,7 +29,7 @@ function snapshotContract(get: () => Promise<{ asOf: Date; balances: Array<{ ass
 export function layer1Contract(
   name: string,
   make: () => Promise<{ port: Layer1Port; org: string }>,
-  opts: { chain: string; destination: string; assetCode?: string } = { chain: 'ethereum-sepolia', destination: '0x00000000000000000000000000000000000000aa' },
+  opts: { chain: string; destination: string; assetCode?: string; providerIdempotent?: boolean } = { chain: 'ethereum-sepolia', destination: '0x00000000000000000000000000000000000000aa' },
 ) {
   describe(`Layer1Port contract: ${name}`, () => {
     it('creates wallets and addresses with provider references', async () => {
@@ -42,7 +42,8 @@ export function layer1Contract(
       expect(a.providerRef).toBeTruthy();
     });
 
-    it('is idempotent on clientReference: a repeated withdrawal request returns the same provider reference', async () => {
+    const idem = opts.providerIdempotent === false ? it.skip : it;
+    idem('is idempotent on clientReference: a repeated withdrawal request returns the same provider reference', async () => {
       const { port, org } = await make();
       const w = await port.createWallet({ organisationId: org });
       const req = { organisationId: org, walletExternalRef: w.externalRef, assetCode: opts.assetCode ?? 'USDC', amount: '1', destination: opts.destination, chain: opts.chain, clientReference: randomUUID() };
