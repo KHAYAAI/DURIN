@@ -16,6 +16,7 @@ import { ComplianceService } from '../compliance/compliance.service';
 import { WebhookDeliveryService } from '../webhooks/webhook-delivery.service';
 import { assertPositiveAmount } from '../common/money';
 import { ensureCustodyRef, ensureCustomer } from '../ledger/chart';
+import { RejectedDepositsService } from '../compliance/rejected-deposits.service';
 import { assertChainAllowed, assertValidDestination, evaluateDeposit } from '../chains/chain-policy';
 import { isSandboxMode } from '../common/sandbox';
 import { sandboxCustody } from '../providers/sandbox-custody';
@@ -36,6 +37,7 @@ export class WalletsService {
     private readonly compliance: ComplianceService,
     private readonly webhooks: WebhookDeliveryService,
     @Inject(LAYER1_PORT) private readonly layer1: Layer1Port,
+    private readonly rejected: RejectedDepositsService,
   ) {}
 
   async createWallet(organisationId: string, label?: string) {
@@ -384,7 +386,7 @@ export class WalletsService {
   async recordDetectedDeposit(
     organisationId: string,
     addressId: string,
-    d: { txHash: string; amount: string; tokenContract: string; tokenSymbol?: string; confirmations: number },
+    d: { txHash: string; amount: string; tokenContract: string; tokenSymbol?: string; confirmations: number; sender?: string; baseUnits?: string },
   ): Promise<
     | { status: 'credited'; journal: Awaited<ReturnType<LedgerService['postJournal']>> }
     | { status: 'pending'; have: number; need: number }
@@ -401,11 +403,9 @@ export class WalletsService {
     });
     if (verdict.action === 'wait') return { status: 'pending', have: verdict.have, need: verdict.need };
     if (verdict.action === 'reject') {
-      await this.prisma.auditLog.create({
-        data: {
-          organisationId, actorType: 'system', action: 'deposit.rejected', resourceType: 'deposit_address', resourceId: addr.id,
-          metadata: { reason: verdict.reason, txHash: d.txHash, tokenContract: d.tokenContract, amount: d.amount },
-        },
+      await this.rejected.record({
+        organisationId, depositAddressId: addr.id, chain: addr.chain, txHash: d.txHash, tokenContract: d.tokenContract,
+        baseUnits: d.baseUnits ?? d.amount, reason: verdict.reason, sender: d.sender ?? null,
       });
       return { status: 'rejected', reason: verdict.reason };
     }

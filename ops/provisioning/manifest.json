@@ -1,0 +1,28 @@
+{
+  "workos": {
+    "organization": { "name": "DURIN", "externalId": "durin" },
+    "permissions": [
+      "organisations:read", "payments:read", "payments:write", "conversions:read", "conversions:write",
+      "wallets:read", "wallets:write", "ledger:read", "compliance:read", "compliance:write", "reconciliation:read"
+    ],
+    "roles": [
+      { "slug": "durin-viewer", "name": "DURIN Viewer", "description": "Read-only access to DURIN dashboards",
+        "permissions": ["organisations:read", "payments:read", "conversions:read", "wallets:read", "ledger:read", "compliance:read", "reconciliation:read"] },
+      { "slug": "durin-operator", "name": "DURIN Operator", "description": "Read and operate payments, conversions, wallets and compliance (no admin)",
+        "permissions": ["organisations:read", "payments:read", "payments:write", "conversions:read", "conversions:write", "wallets:read", "wallets:write", "ledger:read", "compliance:read", "compliance:write", "reconciliation:read"] }
+    ],
+    "manualSteps": [
+      "Add the dashboard redirect URI (<dashboard-url>/callback) under Redirects in the WorkOS dashboard (no API for this in the SDK).",
+      "Configure the AuthKit sign-in methods and Required MFA policy for the environment.",
+      "Set WORKOS_API_KEY, WORKOS_CLIENT_ID and WORKOS_COOKIE_PASSWORD in the API and dashboard environments.",
+      "Link the DURIN organisation: PUT /v1/auth/workos/organisation with the new WorkOS organisation id."
+    ]
+  },
+  "didit": {
+    "note": "Create these in the NEW Didit application (console or the Didit connector), then set DIDIT_WORKFLOW_KYB / DIDIT_WORKFLOW_KYC to the new ids and create a v3 webhook destination for status.updated.",
+    "workflows": [
+      { "label": "DURIN Business KYB", "type": "kyb", "features": ["KYB_REGISTRY", "KYB_DOCUMENTS (required group: LEGAL_PRESENCE)", "KYB_KEY_PEOPLE", "AML (entity: company)"], "end": "Determine" },
+      { "label": "DURIN Account Holder KYC", "type": "kyc", "features": ["OCR", "LIVENESS (PASSIVE)", "FACE_MATCH", "AML", "IP_ANALYSIS"], "end": "Determine" }
+    ]
+  }
+}

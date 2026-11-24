@@ -15,10 +15,10 @@ export class OrganisationsService {
    * Bootstrap: create organisation + optional owner user + first API key.
    * Returns the organisation and the one-time API key secret.
    */
-  async create(name: string, ownerEmail?: string, ownerName?: string, adminKey?: boolean) {
+  async create(name: string, ownerEmail?: string, ownerName?: string, adminKey?: boolean, house?: boolean) {
     return this.prisma.$transaction(async (tx) => {
       const org = await tx.organisation.create({
-        data: { name },
+        data: { name, isHouse: house === true },
       });
 
       if (ownerEmail) {

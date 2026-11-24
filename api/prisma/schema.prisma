@@ -29,6 +29,8 @@ model Organisation {
   status               OrganisationStatus @default(active)
   /// The WorkOS organization whose members may sign in to this organisation (SSO / AuthKit).
   workosOrganizationId String?            @unique @map("workos_organization_id")
+  /// DURIN\'s own (house) organisation: counterparty for internal netting and own-inventory dealing. At most one.
+  isHouse              Boolean            @default(false) @map("is_house")
   createdAt            DateTime           @default(now()) @map("created_at")
   updatedAt            DateTime           @updatedAt @map("updated_at")
 
@@ -360,6 +362,10 @@ model Conversion {
   /// True when a liquidity-provider call may or may not have executed. Funds stay reserved;
   /// the call is never repeated and is only resolved by querying the provider.
   providerUnknown  Boolean          @default(false) @map("provider_unknown")
+  /// provider | house (own inventory) | netted (matched internally; residual hedged externally)
+  executionMode    String           @default("provider") @map("execution_mode")
+  nettingBatchId   String?          @map("netting_batch_id") @db.Uuid
+  matchingUntil    DateTime?        @map("matching_until")
   idempotencyKey   String?          @map("idempotency_key")
   failureReason    String?          @map("failure_reason")
   settledAt        DateTime?        @map("settled_at")
@@ -678,4 +684,65 @@ model GateApproval {
 
   @@index([organisationId, gate])
   @@map("gate_approvals")
+}
+
+/// Where the chain watcher has read up to, per deposit address and token account, so each tick
+/// only examines new finalized transactions. Credits are independently idempotent per (address, tx).
+model ChainCursor {
+  id               String   @id @default(uuid()) @db.Uuid
+  depositAddressId String   @map("deposit_address_id") @db.Uuid
+  tokenAccount     String   @map("token_account")
+  lastSignature    String   @map("last_signature")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@unique([depositAddressId, tokenAccount])
+  @@map("chain_cursors")
+}
+
+/// A deposit that was detected on-chain but NOT credited (wrong/bridged/look-alike token). Never credited;
+/// it follows a controlled return process: review -> second-person approval -> manual return evidence.
+model RejectedDeposit {
+  id               String   @id @default(uuid()) @db.Uuid
+  organisationId   String   @map("organisation_id") @db.Uuid
+  depositAddressId String   @map("deposit_address_id") @db.Uuid
+  chain            String
+  txHash           String   @map("tx_hash")
+  tokenContract    String   @map("token_contract")
+  baseUnits        String   @map("base_units")
+  decimals         Int?
+  reason           String
+  sender           String?
+  /// detected | under_review | approved | returned | held | failed
+  status           String   @default("detected")
+  reviewedBy       String?  @map("reviewed_by")
+  reviewNote       String?  @map("review_note")
+  returnAddress    String?  @map("return_address")
+  overrideReason   String?  @map("override_reason")
+  screeningRef     String?  @map("screening_ref")
+  approvedBy       String?  @map("approved_by")
+  returnTxHash     String?  @map("return_tx_hash")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@unique([depositAddressId, txHash, tokenContract])
+  @@index([organisationId, status])
+  @@map("rejected_deposits")
+}
+
+/// One matching window of opposing customer conversions: matched internally via the house, residual hedged externally.
+model NettingBatch {
+  id               String   @id @default(uuid()) @db.Uuid
+  baseAsset        String   @map("base_asset")
+  /// open | hedging | settling | settled | failed | stalled
+  status           String   @default("open")
+  hedgeAction      String?  @map("hedge_action")
+  hedgeBaseAmount  String?  @map("hedge_base_amount")
+  hedgeQuoteAmount String?  @map("hedge_quote_amount")
+  hedgeProviderRef String?  @map("hedge_provider_ref")
+  failureReason    String?  @map("failure_reason")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("netting_batches")
 }

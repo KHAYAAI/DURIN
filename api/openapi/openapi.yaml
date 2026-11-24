@@ -528,6 +528,65 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '201': { description: Revoked }
+  /compliance/rejected-deposits:
+    get:
+      tags: [Compliance]
+      summary: Wrong-token deposits (never credited) awaiting a return decision
+      responses:
+        '200': { description: OK }
+  /compliance/rejected-deposits/{id}/review:
+    post:
+      tags: [Compliance]
+      summary: Review a rejected deposit - hold, or request a return (screening reference required). Signed-in user + MFA
+      parameters: [ { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '201': { description: Updated }
+  /compliance/rejected-deposits/{id}/approve:
+    post:
+      tags: [Compliance]
+      summary: Approve a return - must be a different person than the reviewer (admin + MFA)
+      parameters: [ { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '201': { description: Approved }
+        '403': { description: Four-eyes violation }
+  /compliance/rejected-deposits/{id}/complete:
+    post:
+      tags: [Compliance]
+      summary: Record the out-of-band on-chain return (transaction hash as evidence)
+      parameters: [ { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '201': { description: Returned }
+  /compliance/gates/{gate}:
+    get:
+      tags: [Compliance]
+      summary: List approvals for gate g1 (live conversion), g2 (internal netting) or g3 (own inventory)
+      parameters: [ { name: gate, in: path, required: true, schema: { type: string, enum: [g1, g2, g3] } } ]
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Compliance]
+      summary: Record a gate approval (signed-in admin + MFA; g2/g3 only on the house organisation)
+      parameters: [ { name: gate, in: path, required: true, schema: { type: string, enum: [g1, g2, g3] } } ]
+      responses:
+        '201': { description: Recorded }
+  /house/position:
+    get:
+      tags: [House]
+      summary: House organisation positions, limits and netting batch counts (house key only)
+      responses:
+        '200': { description: OK }
+  /house/netting-batches:
+    get:
+      tags: [House]
+      summary: Recent netting batches
+      responses:
+        '200': { description: OK }
+  /house/capital:
+    post:
+      tags: [House]
+      summary: Record capital already placed with the custodian (house admin key + bootstrap token)
+      responses:
+        '201': { description: Recorded }
   /version:
     get:
       tags: [Meta]

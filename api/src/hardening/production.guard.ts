@@ -41,6 +41,9 @@ export class ProductionSafety implements OnModuleInit {
     if (!process.env.WORKOS_CLIENT_ID) errors.push('WORKOS_CLIENT_ID is required (verifies dashboard tokens)');
     if (!process.env.WORKOS_API_KEY) errors.push('WORKOS_API_KEY is required (MFA challenges, SSO portal links)');
     if (!process.env.METRICS_TOKEN) this.log.warn('METRICS_TOKEN is not set: /metrics is disabled in production, so there is no monitoring');
+    if ((process.env.HOUSE_DEALING ?? 'off') !== 'off' && !override) {
+      errors.push('HOUSE_DEALING is enabled but no live custody-transfer adapter exists (house dealing and netting are sandbox-only for now)');
+    }
     if (process.env.CONVERSION_LIVE_ENABLED === 'true') {
       this.log.warn('CONVERSION_LIVE_ENABLED=true — gate G1 asserted by operator; ensure counsel sign-off is recorded');
     }

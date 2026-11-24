@@ -19,4 +19,9 @@ export class CreateOrganisationDto {
   @IsOptional()
   @IsBoolean()
   adminKey?: boolean;
+
+  /** Operator-only: create DURIN's own house organisation (at most one; the database enforces it). */
+  @IsOptional()
+  @IsBoolean()
+  house?: boolean;
 }

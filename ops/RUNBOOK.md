@@ -30,6 +30,15 @@ A liquidity/custody call timed out or errored; funds are **reserved** and the or
 4. `insolvent` — custody + LP clearing < customer balances + in-transit: **stop withdrawals and conversions** for the asset (see Kill switches) until explained. Escalate to the MLRO/finance lead.
 5. Acknowledge only after a correcting entry or documented explanation; acknowledgement changes no balance.
 
+### Deposit watcher
+Customers are credited only when the watcher sees a **finalized** token-balance increase on their address. If `durin_deposit_watcher_age_seconds` alerts: check `SOLANA_RPC_URL`/key (provider outage or rate limit), the API logs for `Deposit scan failed`, and that `DEPOSIT_WATCHER_INTERVAL_SECONDS` is set. The cursor never skips a transaction, so after recovery the watcher catches up automatically. Rejected deposits (wrong or bridged mint) appear in the audit log as `deposit.rejected` — they are not credited; funds sit at the custodian and need a manual, counsel-approved return process (not built).
+
+### Netting batch stalled
+A hedge or custody transfer inside a batch has an unknown outcome; customer funds sit at the house and conversions show `providerUnknown`. Do **not** retry the provider by hand. `POST /v1/conversions/{id}/resolve` on any conversion in the batch re-drives it: it asks the provider about the hedge first, books it if filled, or (after the cooling-off period) re-sends only if the provider has no record. Afterwards run `POST /v1/reconciliation/runs` for the house organisation and one customer. If `HOUSE_DEALING` must stop: set it to `off` and restart — pending netted conversions are sent to the provider by the next tick's fallback only after the house is re-enabled for unwinding; contact engineering before changing it with a stalled batch open.
+
+### Wrong-token deposits
+`deposit.rejected` / `rejected_deposits` rows are funds sent in a token DURIN does not support. They are never credited. Process: `GET /v1/compliance/rejected-deposits` → reviewer `POST …/review` (screening reference mandatory; return goes to the sender unless an override reason is given) → a *different* admin `POST …/approve` → custody operators perform the return on-chain → `POST …/complete` with the return transaction hash. Alert `DurinRejectedDepositsAged` fires after 3 days.
+
 ### Stuck withdrawal
 Withdrawal `requested`/`processing` > 10 min. The ledger debit is already posted. Query the custodian by `clientReference` (= withdrawal id); if confirmed, update status; if the custodian rejects, the reversal journal posts automatically; if unknown, treat as *unknown outcome* above.
 

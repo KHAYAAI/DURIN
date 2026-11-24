@@ -35,6 +35,22 @@ Because FORGE Mutual (rand) and OpenFireblocks (custody) are not launch-ready, a
 - `LAYER1_ADAPTER=valr` — one VALR subaccount per DURIN wallet, deposit addresses by network, per-organisation balances, withdrawals.
 - `LAYER2_ADAPTER=valr` — ZAR deposit reference per organisation subaccount; payouts only to already-linked bank accounts.
 **What this does and does not change:** it removes the *engineering* dependency on FORGE Mutual and OpenFireblocks for a pilot. It does **not** remove the legal one: VALR holds customer ZAR and USDC, which differs from the "DURIN holds no customer funds" model only in who the custodian is — counsel must approve it. Open gaps: VALR crypto/fiat withdrawals have no idempotency key (ambiguous outcomes need manual reconciliation); no VALR deposit detection yet (poll deposit history or use webhooks); pair symbols, network names and `customerOrderId` rules are **unverified**; P&L/fee treatment of executed amounts is not yet booked in the ledger. Questions for VALR: `VALR_QUESTIONS.md`.
+## Deposit detection (Solana) — built
+OpenFireblocks emits no inbound-deposit event, so DURIN reads the chain itself (`api/src/chains/deposit-watcher.service.ts`). For every active Solana deposit address it lists the owner's SPL token accounts, walks new **finalized** transactions, takes the amount from the token-balance change, and credits through the chain policy exactly once per (address, tx). Wrong/bridged mints are never credited and are audited (`deposit.rejected`). The cursor only advances past processed transactions, so an RPC outage delays deposits but cannot skip one. Enable with `SOLANA_RPC_URL` and `DEPOSIT_WATCHER_INTERVAL_SECONDS`.
+**Not verified:** it has only run against a fake Solana node. Before relying on it: run against devnet with a real deposit; choose a reliable RPC provider with an SLA; confirm transaction shapes (token-balance fields) on mainnet; decide a policy for returning rejected deposits. EVM chains have no watcher.
+## Liquidity strategy (decided 2026-11-23)
+1. Launch with an **external liquidity provider** (shortlist VALR / Yellow Card; not yet chosen or contracted).
+2. **Net opposing flows internally**, hedging only the residual — designed in `NETTING_DESIGN.md`; the calculator is built and tested, **not wired in**, and waits on counsel (it creates a transient principal position unless matching is atomic).
+3. **Small own inventory later**, after counsel, capital and risk limits. Not built.
+
+## The five previously-paused items (built 2026-11-24)
+| Item | State |
+|---|---|
+| **Netting (variant A)** | Built and tested end to end in the sandbox (matching window, house counterparty, residual-only hedge, unwind on rejection, stall + resolve on unknown, reconciliation clean for customers and house). **Closed by gate G2; sandbox-only** — no live custody-transfer adapter. Waits on counsel question 9 |
+| **Own inventory** | Built and tested (capital recording, limits, fallback, unknown-outcome resolve). **Closed by gate G3; sandbox-only.** P&L is visible in `HOUSE-TRADE-ZAR`; no valuation/mark-to-market or loss limits beyond holdings limits yet |
+| **Ethereum** | Deposit watcher built and tested (finalized ERC-20 `Transfer` logs, native USDC only, wrong tokens recorded for return). Custody: VALR supports Ethereum networks; OpenFireblocks' wallet route still sends native ETH only, so **no OpenFireblocks ERC-20 withdrawals** |
+| **Wrong-token returns** | Built: review → screening reference → four-eyes approval → recorded return evidence, all audited. The on-chain return itself is performed out of band by custody operators (custody APIs refuse unregistered tokens) |
+| **Move off A-CARD** | Tooling built (idempotent WorkOS provisioning script + manifest + runbook `MOVE_OFF_ACARD.md`). **The move is not done**: it needs the new accounts, which only you can create |
 
 ## Account configuration performed (non-secret identifiers)
 - **Didit** (organisation A-CARD, **Sandbox** application only; live application untouched): workflows created and published — *DURIN Business KYB* `65a5d74a-6905-4590-971a-e9bd65641b4e` (registry + documents[LEGAL_PRESENCE required] + key people + AML) and *DURIN Account Holder KYC* `be3877e5-9b0d-4fa2-9d68-123c25160f2a` (OCR + passive liveness + face match + AML + IP analysis). **No webhook destination and no API key were created** (needs a public API URL; secrets must not pass through this session).

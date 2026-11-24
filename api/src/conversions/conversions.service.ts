@@ -17,6 +17,8 @@ import { ConversionAccounts, fillLines, releaseLines, reserveLines, settleLines 
 import { assertPositiveAmount } from '../common/money';
 import { assertSandboxOnly, isSandboxMode } from '../common/sandbox';
 import { assertConversionAllowed } from './live-gate';
+import { HouseService } from '../house/house.service';
+import { HouseExecutor, HouseRejected } from '../house/house-executor.service';
 import { LIQUIDITY_PORT } from '../providers/liquidity/liquidity.module';
 import { LiquidityPort } from '../providers/liquidity/liquidity.port';
 import { GatesService } from '../compliance/gates.service';
@@ -30,7 +32,7 @@ import {
   ensureLpClearing,
 } from '../ledger/chart';
 
-type ConversionRow = Prisma.ConversionGetPayload<object>;
+export type ConversionRow = Prisma.ConversionGetPayload<object>;
 
 /**
  * Conversion state machine (custody-reference ledger, see journal-lines.ts):
@@ -54,7 +56,12 @@ export class ConversionsService {
     private readonly compliance: ComplianceService,
     private readonly gates: GatesService,
     @Inject(LIQUIDITY_PORT) private readonly liquidity: LiquidityPort,
+    private readonly house: HouseService,
+    private readonly houseExec: HouseExecutor,
   ) {}
+
+  private nettingResolver?: { resolveBatch(batchId: string): Promise<void> };
+  registerNettingResolver(r: { resolveBatch(batchId: string): Promise<void> }) { this.nettingResolver = r; }
 
   async createQuote(
     organisationId: string,
@@ -207,7 +214,15 @@ export class ConversionsService {
       throw e;
     }
 
-    // 3. Intent-before-send, then the (single) provider call.
+    // 3. Route: own inventory / internal netting when gated open, otherwise the external provider.
+    const netSource = sub(amounts.source, amounts.fee);
+    const route = await this.house.routeFor({ sourceAsset: src, targetAsset: conv.targetAsset, netSource, target: amounts.target });
+    if (route === 'house') return this.serializeConversion(await this.executeViaHouse(conv, accounts));
+    if (route === 'netted') {
+      const windowMs = Math.max(1, Number(process.env.NETTING_WINDOW_SECONDS ?? 5)) * 1000;
+      return this.serializeConversion(await this.prisma.conversion.update({ where: { id: conv.id }, data: { executionMode: 'netted', matchingUntil: new Date(Date.now() + windowMs) } }));
+    }
+    // Intent-before-send, then the (single) provider call.
     return this.executeWithProvider(conv, accounts);
   }
 
@@ -216,6 +231,11 @@ export class ConversionsService {
     const conv = await this.requireConversion(organisationId, id);
     if (!conv.providerUnknown || conv.status !== 'processing') {
       throw new BadRequestException('Conversion has no unknown provider outcome to resolve');
+    }
+    if (conv.executionMode === 'house') return this.serializeConversion(await this.executeViaHouse(conv));
+    if (conv.executionMode === 'netted' && conv.nettingBatchId && this.nettingResolver) {
+      await this.nettingResolver.resolveBatch(conv.nettingBatchId);
+      return this.serializeConversion(await this.prisma.conversion.findUniqueOrThrow({ where: { id: conv.id } }));
     }
     const accounts = await this.accountsFor(organisationId, conv.sourceAsset, conv.targetAsset);
     const lookup = await this.liquidity.getOrder(organisationId, conv.id);
@@ -402,6 +422,44 @@ export class ConversionsService {
     sandboxCustody.creditOnce(`prefund-${conversionId}`, organisationId, assetCode, shortfall);
   }
 
+  /** Fill from the house's own inventory (G3). Falls back to the provider if the house refuses before moving anything. */
+  async executeViaHouse(conv: ConversionRow, accounts?: ConversionAccounts): Promise<ConversionRow> {
+    const acc = accounts ?? (await this.accountsFor(conv.organisationId, conv.sourceAsset, conv.targetAsset));
+    const houseOrg = await this.house.houseOrgId();
+    if (!houseOrg) return this.fallbackToProvider(conv);
+    const leg = { conversionId: conv.id, organisationId: conv.organisationId, srcAsset: conv.sourceAsset, tgtAsset: conv.targetAsset, net: sub(conv.sourceAmount.toFixed(), conv.feeAmount.toFixed()), target: conv.targetAmount.toFixed() };
+    conv = await this.prisma.conversion.update({ where: { id: conv.id }, data: { executionMode: 'house', providerUnknown: false } });
+    try {
+      await this.houseExec.receive(houseOrg, leg);
+      await this.houseExec.pay(houseOrg, leg);
+    } catch (e) {
+      if (e instanceof HouseRejected) {
+        try { await this.houseExec.unreceive(houseOrg, leg); } catch { return this.flagHouseUnknown(conv); }
+        return this.fallbackToProvider(conv);
+      }
+      this.log.error(`House fill for ${conv.id} has an UNKNOWN outcome: ${e instanceof Error ? e.message : e}`);
+      return this.flagHouseUnknown(conv);
+    }
+    return this.completeFill(conv, acc, `house:${conv.id}`);
+  }
+
+  private flagHouseUnknown(conv: ConversionRow) { return this.prisma.conversion.update({ where: { id: conv.id }, data: { providerUnknown: true } }); }
+
+  /** Used by the netting batch and the house path. */
+  async finishFilled(conv: ConversionRow, providerRef: string): Promise<ConversionRow> {
+    return this.completeFill(conv, await this.accountsFor(conv.organisationId, conv.sourceAsset, conv.targetAsset), providerRef);
+  }
+  async failConversion(conv: ConversionRow, reason: string): Promise<ConversionRow> {
+    return this.releaseAndFail(conv, await this.accountsFor(conv.organisationId, conv.sourceAsset, conv.targetAsset), reason);
+  }
+  /** Send a conversion the house could not handle through the external provider. */
+  async fallbackToProvider(conv: ConversionRow): Promise<ConversionRow> {
+    const c = await this.prisma.conversion.update({ where: { id: conv.id }, data: { executionMode: 'provider', nettingBatchId: null, matchingUntil: null, providerUnknown: false } });
+    const accounts = await this.accountsFor(c.organisationId, c.sourceAsset, c.targetAsset);
+    await this.executeWithProvider(c, accounts);
+    return this.prisma.conversion.findUniqueOrThrow({ where: { id: c.id } });
+  }
+
   async getConversion(organisationId: string, id: string) {
     const c = await this.prisma.conversion.findFirst({
       where: { id, organisationId },
@@ -465,6 +523,7 @@ export class ConversionsService {
     journalId: string | null;
     providerUnknown: boolean;
     providerRef: string | null;
+    executionMode: string;
     failureReason: string | null;
     settledAt: Date | null;
     createdAt: Date;
@@ -483,6 +542,7 @@ export class ConversionsService {
       journalId: c.journalId,
       providerUnknown: c.providerUnknown,
       providerRef: c.providerRef,
+      executionMode: c.executionMode,
       failureReason: c.failureReason,
       settledAt: c.settledAt,
       createdAt: c.createdAt,
