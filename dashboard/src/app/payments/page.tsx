@@ -1,47 +1,31 @@
-import { durinFetch, isConfigured, apiBase } from '@/lib/api';
+import { load, list } from '@/lib/data';
+import { ago, money, short, sumDec } from '@/lib/format';
+import { PageHead, Panel, ErrorNote, Kpi } from '@/components/ui';
+import { DataGrid } from '@/components/DataGrid';
 
-export default async function Page() {
-  let rows: Record<string, unknown>[] = [];
-  let error: string | null = null;
-  if (isConfigured()) {
-    try {
-      const data = await durinFetch<unknown>('/payment_intents');
-      rows = Array.isArray(data) ? (data as Record<string, unknown>[]) : [];
-    } catch (e) {
-      error = e instanceof Error ? e.message : 'load failed';
-    }
-  }
-  const fields = ['id', 'amount', 'assetCode', 'status'];
+export const dynamic = 'force-dynamic';
+interface Intent { id: string; amount: string; assetCode: string; status: string; description: string | null; customerReference: string | null; createdAt: string; settledAt: string | null }
+
+export default async function Payments() {
+  const r = await load<Intent[]>('/payment_intents');
+  const items = list<Intent>(r);
+  const settled = items.filter((i) => i.status === 'settled');
+  const vol = (a: string) => sumDec(settled.filter((i) => i.assetCode === a).map((i) => i.amount));
+  const assets = [...new Set(items.map((i) => i.assetCode))].sort();
   return (
-    <div>
-      <h1>Payments</h1>
-      <p className="sub">Source: {apiBase()}/payment_intents</p>
-      {!isConfigured() && (
-        <div className="note">Set DURIN_API_KEY and DURIN_API_URL to load data.</div>
-      )}
-      {error && <div className="note">Error: {error}</div>}
-      {isConfigured() && !error && (
-        <div className="card" style={{ padding: 0, overflow: 'auto' }}>
-          <table>
-            <thead>
-              <tr>{fields.map((f) => <th key={f}>{f}</th>)}</tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr><td colSpan={fields.length} className="muted">No rows</td></tr>
-              ) : (
-                rows.map((r, i) => (
-                  <tr key={i}>
-                    {fields.map((f) => (
-                      <td key={f}>{String(Array.isArray(r[f]) ? (r[f] as string[]).join(', ') : r[f] ?? '—')}</td>
-                    ))}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+    <>
+      <PageHead title="Payments" sub="Payment intents and their settlement. Each settlement is one balanced journal." />
+      <ErrorNote message={r.error} />
+      <div className="grid g4" style={{ marginBottom: 12 }}>
+        <Kpi label="Intents" value={items.length} /><Kpi label="Settled" value={settled.length} />
+        {assets.slice(0, 2).map((a) => <Kpi key={a} label={`Settled volume · ${a}`} value={money(vol(a), 2)} />)}
+      </div>
+      <Panel title="Payment intents" count={items.length} flush>
+        <DataGrid empty="No payment intents yet" cols={[
+          { key: 'id', label: 'ID', mono: true }, { key: 'description', label: 'Description' }, { key: 'asset', label: 'Asset', kind: 'asset' }, { key: 'amount', label: 'Amount', align: 'r' },
+          { key: 'status', label: 'Status', kind: 'pill', tones: { settled: 'green', pending: 'amber', created: 'blue', cancelled: 'gray', failed: 'red' } }, { key: 'age', label: 'Created' },
+        ]} rows={items.map((i) => ({ id: short(i.id), description: i.description ?? i.customerReference ?? '—', asset: i.assetCode, amount: money(i.amount), status: i.status, age: ago(i.createdAt) }))} />
+      </Panel>
+    </>
   );
 }

@@ -9,14 +9,14 @@ export function SecurityPanel({ verified, expiresAt }: { verified: boolean; expi
   const [pending, start] = useTransition();
 
   return (
-    <div className="grid">
-      <div className="card">
-        <div className="label">This session</div>
-        <div className="value">{verified ? 'MFA verified' : 'MFA not verified'}</div>
+    <div className="grid g2">
+      <div className="panel panel-b">
+        <div className="k" style={{ color: "var(--muted)", fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase" }}>This session</div>
+        <div style={{ font: "600 22px var(--mono)", margin: "6px 0" }}>{verified ? "MFA verified" : "MFA not verified"}</div>
         {expiresAt && <p className="muted">Valid until {new Date(expiresAt).toLocaleTimeString()}</p>}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button disabled={pending} onClick={() => start(async () => setState(await enrollAction()))}>Set up authenticator</button>
-          <button disabled={pending} onClick={() => start(async () => setState(await challengeAction()))}>Verify now</button>
+          <button className="btn" disabled={pending} onClick={() => start(async () => setState(await enrollAction()))}>Set up authenticator</button>
+          <button className="btn ghost" disabled={pending} onClick={() => start(async () => setState(await challengeAction()))}>Verify now</button>
         </div>
         {state.enroll?.qrCode && <img alt="Authenticator QR code" src={state.enroll.qrCode} width={180} height={180} />}
         {state.enroll?.secret && <p className="muted">Secret: <code>{state.enroll.secret}</code></p>}
@@ -29,17 +29,17 @@ export function SecurityPanel({ verified, expiresAt }: { verified: boolean; expi
             }}
           >
             <input type="hidden" name="challengeId" value={state.challengeId} />
-            <input name="code" inputMode="numeric" pattern="\d{6}" maxLength={6} autoComplete="one-time-code" placeholder="123456" required />
-            <button disabled={pending} type="submit">Submit</button>
+            <input className="fld" name="code" inputMode="numeric" pattern="\d{6}" maxLength={6} autoComplete="one-time-code" placeholder="123456" required />
+            <button className="btn" disabled={pending} type="submit">Submit</button>
           </form>
         )}
         {state.message && <p>{state.message}</p>}
         {state.error && <p role="alert">{state.error}</p>}
       </div>
-      <div className="card">
-        <div className="label">Single sign-on</div>
+      <div className="panel panel-b">
+        <div style={{ color: "var(--muted)", fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase" }}>Single sign-on</div>
         <p className="muted">Generate a one-time link for your IT administrator to connect your identity provider (SAML / OIDC). Requires admin role and MFA.</p>
-        <button disabled={pending} onClick={() => start(async () => setPortal(await ssoPortalAction()))}>Create SSO setup link</button>
+        <button className="btn" disabled={pending} onClick={() => start(async () => setPortal(await ssoPortalAction()))}>Create SSO setup link</button>
         {portal.link && <p><a href={portal.link} rel="noreferrer">Open the setup portal</a></p>}
         {portal.error && <p role="alert">{portal.error}</p>}
       </div>
